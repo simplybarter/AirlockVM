@@ -5,6 +5,7 @@
 [![Linux KVM](https://img.shields.io/badge/Virtualization-Linux%20KVM-orange.svg?logo=linux&logoColor=white)](https://www.linux-kvm.org/)
 [![libvirt](https://img.shields.io/badge/Hypervisor-libvirt%20%2F%20QEMU-red.svg?logo=qemu&logoColor=white)](https://libvirt.org/)
 [![Agent Skill](https://img.shields.io/badge/Agent%20Skill-devbox__configure-purple.svg)](.agents/skills/devbox_configure/SKILL.md)
+[![Agent Skill](https://img.shields.io/badge/Agent%20Skill-devbox__deploy-teal.svg)](.agents/skills/devbox_deploy/SKILL.md)
 [![Agent Skill](https://img.shields.io/badge/Agent%20Skill-devbox__rsync-blueviolet.svg)](.agents/skills/devbox_rsync/SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -25,8 +26,9 @@ By strictly separating software engineering workstations from runtime execution 
 * **Proportional Resource Allocation**: Automatically discovers physical host CPU threads and total RAM, dynamically sizing guest vCPUs (e.g. 50% capacity) and memory (e.g. 25% capacity) to prevent host starvation.
 * **Conflict-Free Network Discovery**: Queries libvirt networks (such as `default` / `virbr0`), inspects active DHCP leases, allocates the next unassigned static IP, and generates unique collision-free MAC addresses (`52:54:00:xx:xx:xx`).
 * **Automated Project-to-VM Naming**: Derives the project name from the repository root folder, auto-generating domain names (`<project>-vm`), service units, and user accounts.
+* **Automated Virtual Machine Deployment (`devbox_deploy`)**: Launches the execution VM from `docs/DEVELOPMENT_VM.md` with strict pre-requisite verification gates (validates runbook existence and `verify_config.py` health), automated cloud-init image seeding, static DHCP reservations, and systemd socket forwarding.
 * **Intelligent Code Synchronization (`devbox_rsync`)**: Evaluates project manifests (Python, Node.js, Rust, Go) and generates an optimized, git-ignored `sync_to_devbox.sh` script to sync ONLY application code to the VM while ignoring local caches and agent files.
-* **Antigravity AI Agent Skills**: Includes ready-to-use `.agents/skills/devbox_configure` and `.agents/skills/devbox_rsync` skills for autonomous agent-driven VM customization and workspace sync.
+* **Antigravity AI Agent Skills**: Includes ready-to-use `.agents/skills/devbox_configure`, `.agents/skills/devbox_deploy`, and `.agents/skills/devbox_rsync` skills for autonomous agent-driven VM customization, provisioning, and workspace sync.
 
 ---
 
@@ -78,6 +80,10 @@ By strictly separating software engineering workstations from runtime execution 
 │   │       ├── configure_vm.py              # Primary customization and rendering engine
 │   │       ├── probe_hypervisor.py          # Hypervisor discovery and capability checker
 │   │       └── verify_config.py             # Template coverage and syntax validator
+│   ├── devbox_deploy/
+│   │   ├── SKILL.md                         # Virtual machine deployment skill
+│   │   └── scripts/
+│   │       └── deploy_vm.py                 # VM provisioning and lifecycle engine
 │   └── devbox_rsync/
 │       ├── SKILL.md                         # Application code synchronization skill
 │       └── scripts/
@@ -180,4 +186,5 @@ If any check fails, the tool stops immediately and displays actionable troublesh
 This repository includes skill definitions compatible with Antigravity AI coding assistants. Agents can trigger these workflows using slash commands:
 
 * `/devbox_configure` — Probe hypervisors and generate parameterized VM execution runbooks.
+* `/devbox_deploy` — Deploy, provision, and manage execution VMs with strict validation gates.
 * `/devbox_rsync` — Evaluate project structure and generate the optimized `sync_to_devbox.sh` script.

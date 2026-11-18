@@ -9,7 +9,7 @@ set -euo pipefail
 DEFAULT_REPO="https://github.com/SimplyBarter/DevBox.git"
 REPO_URL="${DEVBOX_REPO:-$DEFAULT_REPO}"
 BRANCH="${DEVBOX_BRANCH:-main}"
-DEFAULT_SKILLS=("devbox_configure" "devbox_rsync")
+DEFAULT_SKILLS=("devbox_configure" "devbox_rsync" "devbox_deploy")
 CHOSEN_SKILL=""
 
 # Determine target directory
@@ -26,7 +26,7 @@ Usage:
 Options:
   -l, --local             Install into current project (.agents/skills) [Default]
   -g, --global            Install globally (~/.agents/skills)
-  -s, --skill <name>      Install a specific skill (devbox_configure, devbox_rsync). Default: all
+  -s, --skill <name>      Install a specific skill (devbox_configure, devbox_rsync, devbox_deploy). Default: all
   -t, --target <path>     Install into a custom target base directory
   -r, --repo <url>        Git repository URL (Default: $DEFAULT_REPO)
   -b, --branch <branch>   Git branch (Default: $BRANCH)
@@ -186,8 +186,10 @@ echo ""
 echo "To use the skills in your project:"
 echo "  - In Chat / AI Assistant:"
 echo "      /devbox_configure  (Generate VM execution runbook)"
+echo "      /devbox_deploy     (Deploy and provision virtual machine)"
 echo "      /devbox_rsync      (Generate application code sync script)"
 echo "  - From CLI:"
 echo "      python3 $TARGET_BASE/devbox_configure/scripts/configure_vm.py --probe localhost"
+echo "      python3 $TARGET_BASE/devbox_deploy/scripts/deploy_vm.py"
 echo "      python3 $TARGET_BASE/devbox_rsync/scripts/generate_sync.py"
 echo ""
