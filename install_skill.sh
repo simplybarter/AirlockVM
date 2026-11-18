@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# DevBox Skill Installer & Updater
-# Installs or updates the 'devbox_configure' skill in a project or globally.
+# DevBox Skills Installer & Updater
+# Installs or updates DevBox agent skills in a project or globally.
 # ==============================================================================
 
 set -euo pipefail
@@ -9,29 +9,31 @@ set -euo pipefail
 DEFAULT_REPO="https://github.com/SimplyBarter/DevBox.git"
 REPO_URL="${DEVBOX_REPO:-$DEFAULT_REPO}"
 BRANCH="${DEVBOX_BRANCH:-main}"
-SKILL_NAME="devbox_configure"
+DEFAULT_SKILLS=("devbox_configure" "devbox_rsync")
+CHOSEN_SKILL=""
 
 # Determine target directory
 DEST_MODE="local"
-TARGET_DIR=""
+TARGET_BASE=""
 
 show_help() {
   cat <<EOF
-DevBox Skill Installer & Updater
+DevBox Skills Installer & Updater
 
 Usage:
   ./install_skill.sh [OPTIONS]
 
 Options:
-  -l, --local             Install into current project (.agents/skills/$SKILL_NAME) [Default]
-  -g, --global            Install globally (~/.agents/skills/$SKILL_NAME)
-  -t, --target <path>     Install into a custom target directory
+  -l, --local             Install into current project (.agents/skills) [Default]
+  -g, --global            Install globally (~/.agents/skills)
+  -s, --skill <name>      Install a specific skill (devbox_configure, devbox_rsync). Default: all
+  -t, --target <path>     Install into a custom target base directory
   -r, --repo <url>        Git repository URL (Default: $DEFAULT_REPO)
   -b, --branch <branch>   Git branch (Default: $BRANCH)
   -h, --help              Show this help message
 
 Examples:
-  # Install into current project:
+  # Install all skills into current project:
   ./install_skill.sh
 
   # One-line install from GitHub:
@@ -39,6 +41,9 @@ Examples:
 
   # Install globally across all projects:
   ./install_skill.sh --global
+
+  # Install only devbox_rsync:
+  ./install_skill.sh --skill devbox_rsync
 EOF
 }
 
@@ -52,9 +57,13 @@ while [[ $# -gt 0 ]]; do
       DEST_MODE="global"
       shift
       ;;
+    -s|--skill)
+      CHOSEN_SKILL="$2"
+      shift 2
+      ;;
     -t|--target)
       DEST_MODE="custom"
-      TARGET_DIR="$2"
+      TARGET_BASE="$2"
       shift 2
       ;;
     -r|--repo)
@@ -77,21 +86,29 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Resolve destination path
+# Resolve skills to install
+if [[ -n "$CHOSEN_SKILL" ]]; then
+  SKILLS=("$CHOSEN_SKILL")
+else
+  SKILLS=("${DEFAULT_SKILLS[@]}")
+fi
+
+# Resolve destination base directory
 if [[ "$DEST_MODE" == "local" ]]; then
-  TARGET_DIR="$(pwd)/.agents/skills/$SKILL_NAME"
+  TARGET_BASE="$(pwd)/.agents/skills"
 elif [[ "$DEST_MODE" == "global" ]]; then
-  TARGET_DIR="$HOME/.agents/skills/$SKILL_NAME"
+  TARGET_BASE="$HOME/.agents/skills"
 fi
 
 echo "============================================================"
-echo " DevBox Skill: Install / Update ($SKILL_NAME)"
+echo " DevBox Skills: Install / Update"
+echo " Skills: ${SKILLS[*]}"
+echo " Target Base: $TARGET_BASE"
 echo "============================================================"
-echo "Target Location: $TARGET_DIR"
 
 # Check if running from within a local DevBox repository clone
 SCRIPT_SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOCAL_SKILL_SOURCE="$SCRIPT_SOURCE_DIR/.agents/skills/$SKILL_NAME"
+LOCAL_SKILLS_ROOT="$SCRIPT_SOURCE_DIR/.agents/skills"
 
 TMP_DIR=""
 cleanup() {
@@ -101,9 +118,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ -d "$LOCAL_SKILL_SOURCE" && "$LOCAL_SKILL_SOURCE" != "$TARGET_DIR" ]]; then
-  echo "[*] Installing from local repository source: $LOCAL_SKILL_SOURCE"
-  SOURCE_DIR="$LOCAL_SKILL_SOURCE"
+if [[ -d "$LOCAL_SKILLS_ROOT" && "$LOCAL_SKILLS_ROOT" != "$TARGET_BASE" ]]; then
+  echo "[*] Installing from local repository source: $LOCAL_SKILLS_ROOT"
+  SOURCE_BASE="$LOCAL_SKILLS_ROOT"
 else
   echo "[*] Fetching latest skill files from $REPO_URL ($BRANCH)..."
   TMP_DIR="$(mktemp -d /tmp/devbox_install_XXXXXX)"
@@ -113,51 +130,64 @@ else
     mkdir -p "$TMP_DIR/repo"
     curl -fsSL "$ARCHIVE_URL" | tar -xz -C "$TMP_DIR/repo" --strip-components=1
   }
-  SOURCE_DIR="$TMP_DIR/repo/.agents/skills/$SKILL_NAME"
+  SOURCE_BASE="$TMP_DIR/repo/.agents/skills"
 fi
 
-if [[ ! -d "$SOURCE_DIR" ]]; then
-  echo "Error: Could not locate skill source directory at $SOURCE_DIR" >&2
-  exit 1
-fi
+for SKILL_NAME in "${SKILLS[@]}"; do
+  SOURCE_DIR="$SOURCE_BASE/$SKILL_NAME"
+  TARGET_DIR="$TARGET_BASE/$SKILL_NAME"
 
-# Prepare target directory
-ACTION="Installing"
-if [[ -d "$TARGET_DIR" ]]; then
-  ACTION="Updating"
-fi
-echo "[*] $ACTION skill files into $TARGET_DIR..."
+  if [[ ! -d "$SOURCE_DIR" ]]; then
+    echo "Error: Could not locate skill source directory at $SOURCE_DIR" >&2
+    exit 1
+  fi
 
-mkdir -p "$TARGET_DIR/template" "$TARGET_DIR/scripts"
+  ACTION="Installing"
+  if [[ -d "$TARGET_DIR" ]]; then
+    ACTION="Updating"
+  fi
+  echo "[*] $ACTION skill '$SKILL_NAME' into $TARGET_DIR..."
 
-# Copy skill components
-cp "$SOURCE_DIR/SKILL.md" "$TARGET_DIR/SKILL.md"
-cp "$SOURCE_DIR/template/DEVELOPMENT_VM.md.template" "$TARGET_DIR/template/DEVELOPMENT_VM.md.template"
-cp "$SOURCE_DIR/template/defaults.json" "$TARGET_DIR/template/defaults.json"
-cp "$SOURCE_DIR/scripts/configure_vm.py" "$TARGET_DIR/scripts/configure_vm.py"
-cp "$SOURCE_DIR/scripts/probe_hypervisor.py" "$TARGET_DIR/scripts/probe_hypervisor.py"
-cp "$SOURCE_DIR/scripts/verify_config.py" "$TARGET_DIR/scripts/verify_config.py"
+  mkdir -p "$TARGET_DIR"
 
-# Set executable permissions on scripts
-chmod +x "$TARGET_DIR/scripts/configure_vm.py" \
-         "$TARGET_DIR/scripts/probe_hypervisor.py" \
-         "$TARGET_DIR/scripts/verify_config.py"
+  # Copy SKILL.md
+  if [[ -f "$SOURCE_DIR/SKILL.md" ]]; then
+    cp "$SOURCE_DIR/SKILL.md" "$TARGET_DIR/SKILL.md"
+  fi
 
-echo "[✓] Files successfully copied and permissions set."
+  # Copy template directory if exists
+  if [[ -d "$SOURCE_DIR/template" ]]; then
+    mkdir -p "$TARGET_DIR/template"
+    cp -r "$SOURCE_DIR/template/." "$TARGET_DIR/template/"
+  fi
 
-# Run verification in target directory
-echo "[*] Verifying installation health..."
-if python3 "$TARGET_DIR/scripts/verify_config.py"; then
-  echo ""
-  echo "============================================================"
-  echo " [✓] DevBox skill successfully installed/updated!"
-  echo "============================================================"
-  echo ""
-  echo "To use the skill in your project:"
-  echo "  - In Chat / AI Assistant: Type '/devbox_configure'"
-  echo "  - From CLI: python3 $TARGET_DIR/scripts/configure_vm.py --probe localhost"
-  echo ""
-else
-  echo "[-] Warning: verify_config.py reported an issue with the installation." >&2
-  exit 1
-fi
+  # Copy scripts directory if exists
+  if [[ -d "$SOURCE_DIR/scripts" ]]; then
+    mkdir -p "$TARGET_DIR/scripts"
+    cp -r "$SOURCE_DIR/scripts/." "$TARGET_DIR/scripts/"
+    find "$TARGET_DIR/scripts" -type f -name "*.py" -exec chmod +x {} +
+  fi
+
+  echo "    [✓] Files for '$SKILL_NAME' copied."
+
+  # Verify if verify_config exists in skill
+  if [[ -f "$TARGET_DIR/scripts/verify_config.py" ]]; then
+    echo "    [*] Running verification for $SKILL_NAME..."
+    python3 "$TARGET_DIR/scripts/verify_config.py" >/dev/null
+    echo "    [✓] Health check passed."
+  fi
+done
+
+echo ""
+echo "============================================================"
+echo " [✓] DevBox skills successfully installed/updated!"
+echo "============================================================"
+echo ""
+echo "To use the skills in your project:"
+echo "  - In Chat / AI Assistant:"
+echo "      /devbox_configure  (Generate VM execution runbook)"
+echo "      /devbox_rsync      (Generate application code sync script)"
+echo "  - From CLI:"
+echo "      python3 $TARGET_BASE/devbox_configure/scripts/configure_vm.py --probe localhost"
+echo "      python3 $TARGET_BASE/devbox_rsync/scripts/generate_sync.py"
+echo ""
