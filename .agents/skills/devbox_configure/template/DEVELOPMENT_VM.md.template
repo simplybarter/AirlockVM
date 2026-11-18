@@ -142,12 +142,7 @@ The unified application server runs inside `{{ VM_NAME }}` on port {{ APP_INTERN
 
 * **Service Definition**: `{{ PROXY_SOCKET_SERVICE }}` on `{{ HYPERVISOR_HOST }}`.
 * **Access URL**: **`http://{{ HYPERVISOR_HOST }}:{{ PROXY_EXTERNAL_PORT }}/`** (or `http://{{ HYPERVISOR_LAN_IP }}:{{ PROXY_EXTERNAL_PORT }}/`).
-* **Available Interfaces**:
-  * Marketing Landing Page: `http://{{ HYPERVISOR_HOST }}:{{ PROXY_EXTERNAL_PORT }}/`
-  * Onboarding: `http://{{ HYPERVISOR_HOST }}:{{ PROXY_EXTERNAL_PORT }}/onboarding`
-  * Customer Dashboard: `http://{{ HYPERVISOR_HOST }}:{{ PROXY_EXTERNAL_PORT }}/dashboard`
-  * Operations Command Center: `http://{{ HYPERVISOR_HOST }}:{{ PROXY_EXTERNAL_PORT }}/operations`
-  * Health Diagnostics: `http://{{ HYPERVISOR_HOST }}:{{ PROXY_EXTERNAL_PORT }}/api/health`
+* **Traffic Routing**: Transparently forwards all incoming TCP traffic, HTTP methods, WebSockets, and sub-paths (`/*`) received on port `{{ PROXY_EXTERNAL_PORT }}` to port `{{ APP_INTERNAL_PORT }}` inside `{{ VM_NAME }}`.
 
 ---
 
