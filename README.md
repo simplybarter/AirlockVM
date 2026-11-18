@@ -9,6 +9,8 @@
 
 > **Automated Execution Virtual Machine Sizing, Runbook Generator, and Agent Skill**
 
+[📖 Zero-Workload Use Case](USECASE.md) • [🏗 Architecture](docs/ARCHITECTURE.md) • [⚡ Quickstart](#getting-started) • [🤝 Contributing](CONTRIBUTING.md)
+
 DevBox provides automated tooling and a parameterized specification framework to configure, size, and deploy dedicated Linux KVM execution virtual machines for development teams and AI agents.
 
 By strictly separating software engineering workstations from runtime execution environments, DevBox enforces an isolation boundary: all builds, crawler loops, browser automation, and untrusted code evaluation execute inside dedicated guest VMs hosted on local or remote hypervisors.
