@@ -1,5 +1,12 @@
 # DevBox
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Linux KVM](https://img.shields.io/badge/Virtualization-Linux%20KVM-orange.svg?logo=linux&logoColor=white)](https://www.linux-kvm.org/)
+[![libvirt](https://img.shields.io/badge/Hypervisor-libvirt%20%2F%20QEMU-red.svg?logo=qemu&logoColor=white)](https://libvirt.org/)
+[![Agent Skill](https://img.shields.io/badge/Agent%20Skill-devbox__configure-purple.svg)](.agents/skills/devbox_configure/SKILL.md)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
 > **Automated Execution Virtual Machine Sizing, Runbook Generator, and Agent Skill**
 
 DevBox provides automated tooling and a parameterized specification framework to configure, size, and deploy dedicated Linux KVM execution virtual machines for development teams and AI agents.
