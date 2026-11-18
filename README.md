@@ -56,6 +56,7 @@ By strictly separating software engineering workstations from runtime execution 
 ```text
 .
 ├── README.md                                # Project documentation
+├── USECASE.md                               # Zero-workload local workstation use case guide
 ├── CONTRIBUTING.md                          # Contribution guidelines
 ├── LICENSE                                  # MIT License
 ├── install_skill.sh                         # Skill installer & updater script
