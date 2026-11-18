@@ -41,13 +41,12 @@ You author code on your workstation, but **zero application code runs directly o
 Work inside your favorite IDE on your workstation as usual. You have full access to your desktop tools, extensions, and git workflows.
 
 ### 2. Fast Code Synchronization
-Sync your code into the local VM in milliseconds:
+Sync your code into the local VM in milliseconds using the generated sync script:
 ```bash
-# Push latest changes to the dedicated VM
-rsync -avz --exclude='.git' --exclude='node_modules' --exclude='venv' \
-  ./ devbox-vm:~/DevBox/
+# Push application changes to the dedicated VM (skips caches, venvs, and docs)
+./sync_to_devbox.sh
 ```
-*(Alternatively, attach via VS Code Remote-SSH to edit directly inside the VM).*
+*(Generated automatically by the `devbox_rsync` skill; alternatively, attach via VS Code Remote-SSH to edit directly inside the VM).*
 
 ### 3. Execution & Testing Inside the VM
 Execute builds, migrations, and test suites over SSH:
@@ -75,11 +74,20 @@ Your workstation host OS remains untouched, clean, and fast.
 ## How DevBox Automates This Setup
 
 DevBox takes care of all setup friction automatically:
-1. **Detects Local KVM**: Probes your hardware to ensure `/dev/kvm` and `virbr0` are available.
+1. **Detects Local KVM**: Probes your hardware to ensure `/dev/kvm` and `virbr0` are available (`devbox_configure`).
 2. **Calculates Proportional Sizing**: Allocates 50% vCPUs and ~25% RAM to the VM so your workstation desktop never freezes.
-3. **Generates the Exact Runbook**: Creates your step-by-step operational specification ([`docs/DEVELOPMENT_VM.md`](docs/DEVELOPMENT_VM.md)) with ready-to-run lifecycle commands.
+3. **Generates the Exact Runbook**: Creates your step-by-step operational specification ([`docs/DEVELOPMENT_VM.md`](docs/DEVELOPMENT_VM.md)).
+4. **Automated VM Provisioning**: Provisions domain, cloud-init seed, static DHCP, and socket proxying (`devbox_deploy`).
+5. **Intelligent Code Synchronization**: Excludes heavy local caches and copies only application files (`devbox_rsync`).
 
-To generate this setup for your machine:
+To set this up for your machine:
 ```bash
+# 1. Configure the runbook:
 python3 .agents/skills/devbox_configure/scripts/configure_vm.py --probe localhost
+
+# 2. Deploy the VM:
+python3 .agents/skills/devbox_deploy/scripts/deploy_vm.py --yes
+
+# 3. Generate the sync script:
+python3 .agents/skills/devbox_rsync/scripts/generate_sync.py
 ```

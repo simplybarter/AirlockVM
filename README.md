@@ -4,9 +4,6 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![Linux KVM](https://img.shields.io/badge/Virtualization-Linux%20KVM-orange.svg?logo=linux&logoColor=white)](https://www.linux-kvm.org/)
 [![libvirt](https://img.shields.io/badge/Hypervisor-libvirt%20%2F%20QEMU-red.svg?logo=qemu&logoColor=white)](https://libvirt.org/)
-[![Agent Skill](https://img.shields.io/badge/Agent%20Skill-devbox__configure-purple.svg)](.agents/skills/devbox_configure/SKILL.md)
-[![Agent Skill](https://img.shields.io/badge/Agent%20Skill-devbox__deploy-teal.svg)](.agents/skills/devbox_deploy/SKILL.md)
-[![Agent Skill](https://img.shields.io/badge/Agent%20Skill-devbox__rsync-blueviolet.svg)](.agents/skills/devbox_rsync/SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 > **Automated Execution Virtual Machine Sizing, Runbook Generator, and Agent Skill**
@@ -95,16 +92,16 @@ By strictly separating software engineering workstations from runtime execution 
 
 ## Installation & Skill Setup
 
-You can install or update the `devbox_configure` skill into any repository or globally across your development environment using `install_skill.sh`:
+You can install or update the DevBox agent skills (`devbox_configure`, `devbox_deploy`, `devbox_rsync`) into any repository or globally across your development environment using `install_skill.sh`:
 
 ```bash
-# Option A: Install into current repository (.agents/skills/devbox_configure)
+# Option A: Install all skills into current repository (.agents/skills/*)
 ./install_skill.sh
 
 # Option B: One-line install/update directly from GitHub
 curl -fsSL https://raw.githubusercontent.com/SimplyBarter/DevBox/main/install_skill.sh | bash
 
-# Option C: Install globally for all projects (~/.agents/skills/devbox_configure)
+# Option C: Install globally for all projects (~/.agents/skills/*)
 ./install_skill.sh --global
 ```
 
@@ -163,6 +160,33 @@ Ensure that all placeholders in the template are accounted for and no unrendered
 
 ```bash
 python3 .agents/skills/devbox_configure/scripts/verify_config.py
+```
+
+### 6. Deploy the Execution Virtual Machine
+
+Launch the virtual machine defined in `docs/DEVELOPMENT_VM.md` with pre-requisite enforcement:
+
+```bash
+# Preview deployment plan (dry-run):
+python3 .agents/skills/devbox_deploy/scripts/deploy_vm.py --dry-run
+
+# Deploy with interactive confirmation:
+python3 .agents/skills/devbox_deploy/scripts/deploy_vm.py
+
+# Deploy non-interactively (CI / automated):
+python3 .agents/skills/devbox_deploy/scripts/deploy_vm.py --yes
+```
+
+### 7. Synchronize Application Code
+
+Generate an optimized `sync_to_devbox.sh` script to mirror your project files into the VM:
+
+```bash
+# Generate the sync script tailored to your project stack:
+python3 .agents/skills/devbox_rsync/scripts/generate_sync.py
+
+# Perform differential synchronization:
+./sync_to_devbox.sh
 ```
 
 ---
