@@ -1,5 +1,5 @@
-# Generated documentation & local runbooks
-docs/
+# Generated local VM runbook
+docs/DEVELOPMENT_VM.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
