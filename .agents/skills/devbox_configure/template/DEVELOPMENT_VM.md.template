@@ -1,0 +1,196 @@
+# Dedicated {{ PROJECT_NAME }} Execution Virtual Machine (`{{ VM_NAME }}`)
+
+> **Infrastructure & Developer Execution Environment Runbook**  
+> *Defines the topology, isolation boundary, hardware specification, networking, and operation of the dedicated {{ PROJECT_NAME }} VM hosted on hypervisor `{{ HYPERVISOR_HOST }}`.*
+
+---
+
+## 1. System Architecture & Topology
+
+To ensure strict separation of concerns, safety, reproducibility, and system stability, the {{ PROJECT_NAME }} project enforces a two-tier host architecture:
+
+1. **Development Host (`{{ DEV_HOST }}`)**:
+   * **Role**: Exclusively designated for software engineering, code authoring, git version control, documentation, and IDE tooling.
+   * **Invariant**: **Zero execution of {{ PROJECT_NAME }} runtime workloads.** No browser scraping, automated UI agent testing, untrusted code evaluation, or container fleets are executed on this machine.
+
+2. **Virtualization Hypervisor (`{{ HYPERVISOR_HOST }}`)**:
+   * **Role**: Dedicated physical server running {{ HYPERVISOR_OS }} and hardware-accelerated Linux KVM (`/dev/kvm`).
+   * **Function**: Hosts the virtual machines, bridges network traffic, and isolates guest execution environments from local workstations.
+
+3. **Dedicated {{ PROJECT_NAME }} Guest VM (`{{ VM_NAME }}`) on `{{ HYPERVISOR_HOST }}`**:
+   * **Role**: The dedicated execution engine for {{ PROJECT_NAME }}.
+   * **Function**: Executes all {{ PROJECT_NAME }} container fleets (Human & AI Agent review loops), headless browser instances (Playwright / Puppeteer), agentic task loops, and backend microservices.
+
+```
++------------------------------------+          SSH ProxyJump
+|      Development Workstation       |-------------------------------+
+|             ({{ DEV_HOST }})              |                               |
+| * Code Authoring & Git Commits     |                               |
+| * Project Documentation            |                               |
+| * IDE / VS Code / Cursor           |                               |
+| * NO RUNTIME WORKLOADS             |                               |
++------------------------------------+                               |
+                                                                     v
++-----------------------------------------------------------------------------------------+
+| Physical Hypervisor Host ({{ HYPERVISOR_HOST }})                                                      |
+| OS: {{ HYPERVISOR_OS }} | {{ HYPERVISOR_SPECS }}                      |
+|                                                                                         |
+|   +---------------------------------------------------------------------------------+   |
+|   | Dedicated Guest: {{ VM_NAME }} (IP: {{ VM_IP }})                            |   |
+|   | {{ VCPU_CORES }} vCPUs | {{ RAM_MIB }} MiB RAM | {{ DISK_SIZE_GIB }} GiB Disk | Static DHCP | Docker & Python Stack      |   |
+|   |                                                                                 |   |
+|   |   [ {{ PROJECT_NAME }} Agentic Workhorse Execution Environment ]                         |   |
+|   |                                                                                 |   |
+|   |   +-------------------------------------------------------------------------+   |   |
+|   |   | Ephemeral Isolated Execution Containers                                 |   |   |
+|   |   |   [ Container 1 ]       [ Container 2 ]       [ Container 3 ]           |   |   |
+|   |   |   Human Visitor         Human Customer        AI Agent Visitor          |   |   |
+|   |   +-------------------------------------------------------------------------+   |   |
+|   +---------------------------------------------------------------------------------+   |
++-----------------------------------------------------------------------------------------+
+```
+
+---
+
+## 2. Hardware & Virtual Machine Specifications
+
+| Parameter | Specification | Details |
+| :--- | :--- | :--- |
+| **VM Name** | `{{ VM_NAME }}` | Registered domain in libvirt on `{{ HYPERVISOR_HOST }}` |
+| **Target Hypervisor** | `{{ HYPERVISOR_HOST }}` | Managed via KVM / libvirt / QEMU |
+| **Guest OS** | {{ GUEST_OS }} | {{ GUEST_OS_DETAILS }} |
+| **Virtual CPUs** | {{ VCPU_CORES }} Cores | Mode: `{{ CPU_MODE }}` |
+| **Memory (RAM)** | {{ RAM_MIB }} MiB ({{ RAM_GB }} GB) | Dynamic memory ballooning via `{{ BALLOON_DRIVER }}` |
+| **Virtual Storage** | {{ DISK_SIZE_GIB }} GiB `{{ DISK_FORMAT }}` | Dynamic copy-on-write disk with rapid snapshots |
+| **Firmware** | UEFI (`{{ UEFI_FIRMWARE }}`) | Secure UEFI bootloader with GPT partition table |
+| **Network IP** | `{{ VM_IP }}{{ SUBNET_CIDR }}` | Static DHCP lease on virtual bridge `{{ VIRT_BRIDGE }}` |
+| **MAC Address** | `{{ VM_MAC }}` | Reserved hardware address in libvirt `{{ LIBVIRT_NETWORK }}` net |
+| **Primary User** | `{{ VM_PRIMARY_USER }}` | Passwordless `sudo`, member of `docker` group |
+| **Secondary User** | `{{ VM_SECONDARY_USER }}` | Administrative access with passwordless `sudo` |
+
+---
+
+## 3. Pre-Installed Software Stack on `{{ VM_NAME }}`
+
+The VM is bootstrapped via `cloud-init` with all essential tooling pre-configured:
+* **Container Runtime**: `docker.io`, `containerd`, and `docker-compose-v2` for orchestrating the multi-persona isolated audit containers.
+* **Hypervisor Integration**: `qemu-guest-agent` for live status reporting, IP reporting, and host-guest management.
+* **Python Environment**: `python3`, `python3-venv`, and `python3-pip` for running agent loops, scoring engines, and API services.
+* **Developer Utilities**: `git`, `curl`, `wget`, `jq`, `tmux`, `htop`, `ca-certificates`, and `rsync`.
+
+---
+
+## 4. Connectivity & Access Configuration
+
+### 4.1 Dedicated SSH Key Pair
+Access from `{{ DEV_HOST }}` to `{{ VM_NAME }}` is authenticated using a dedicated ED25519 keypair:
+* **Private Key**: `{{ SSH_KEY_PATH }}`
+* **Public Key**: `{{ SSH_KEY_PATH }}.pub`
+
+### 4.2 SSH Client Configuration
+The following block is configured in `~/.ssh/config` on `{{ DEV_HOST }}`:
+
+```ssh
+Host {{ VM_NAME }}
+    HostName {{ VM_IP }}
+    User {{ VM_PRIMARY_USER }}
+    ProxyJump {{ HYPERVISOR_HOST }}
+    IdentityFile {{ SSH_KEY_PATH }}
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+```
+
+### 4.3 Direct Shell & Command Execution
+You can connect interactively or run one-off remote commands from `{{ DEV_HOST }}`:
+
+```bash
+# Interactive shell session
+ssh {{ VM_NAME }}
+
+# Check system state and Docker daemon
+ssh {{ VM_NAME }} "docker ps && uptime"
+```
+
+---
+
+## 5. Development & Dogfooding Workflow
+
+A core tenet of {{ PROJECT_NAME }} is **self-hosting / dogfooding**: using {{ PROJECT_NAME }} itself to continuously test and audit the {{ PROJECT_NAME }} web application during development.
+
+### 5.1 Code Synchronization
+Code is written on `{{ DEV_HOST }}` and synchronized to `{{ VM_NAME }}` for building and testing:
+
+```bash
+# Sync local codebase to the {{ PROJECT_NAME }} VM (from project root)
+rsync -avz --exclude='.git' --exclude='node_modules' --exclude='venv' \
+  --exclude='.env*.local' --exclude='dist' --exclude='.next' --exclude='__pycache__' \
+  ./ {{ VM_NAME }}:{{ REMOTE_CODE_DIR }}
+```
+
+### 5.2 Executing {{ PROJECT_NAME }} Audits on Its Own Components
+When a developer updates the {{ PROJECT_NAME }} Landing Page, Onboarding flow, or Customer Dashboard:
+1. The web application is built and started inside `{{ VM_NAME }}`.
+2. The {{ PROJECT_NAME }} Workhorse launches isolated evaluation containers for:
+   * **Human Visitor**: Auditing the {{ PROJECT_NAME }} marketing landing page and registration form.
+   * **Human Customer**: Logging into a mock {{ PROJECT_NAME }} dashboard and testing project creation.
+   * **AI Agent Visitor**: Testing whether AI answer engines and search agents can interpret {{ PROJECT_NAME }}'s value proposition.
+   * **AI Agent Customer**: Testing whether an external AI agent can interact programmatically with {{ PROJECT_NAME }}'s authenticated endpoints.
+3. The resulting itemized reports and screenshots are generated on `{{ VM_NAME }}` and synced back to `{{ DEV_HOST }}` for review.
+
+### 5.3 Accessing the Live Web Application on {{ HYPERVISOR_HOST_TITLE }} (Zero Host Processes on {{ DEV_HOST_TITLE }})
+The unified application server runs inside `{{ VM_NAME }}` on port {{ APP_INTERNAL_PORT }}. To enable browser access from `{{ DEV_HOST }}` (or any device on the physical LAN) with **zero tasks or processes running on `{{ DEV_HOST }}`**, hypervisor `{{ HYPERVISOR_HOST }}` runs a persistent systemd socket forwarder (`systemd-socket-proxyd`):
+
+* **Service Definition**: `{{ PROXY_SOCKET_SERVICE }}` on `{{ HYPERVISOR_HOST }}`.
+* **Access URL**: **`http://{{ HYPERVISOR_HOST }}:{{ PROXY_EXTERNAL_PORT }}/`** (or `http://{{ HYPERVISOR_LAN_IP }}:{{ PROXY_EXTERNAL_PORT }}/`).
+* **Available Interfaces**:
+  * Marketing Landing Page: `http://{{ HYPERVISOR_HOST }}:{{ PROXY_EXTERNAL_PORT }}/`
+  * Onboarding: `http://{{ HYPERVISOR_HOST }}:{{ PROXY_EXTERNAL_PORT }}/onboarding`
+  * Customer Dashboard: `http://{{ HYPERVISOR_HOST }}:{{ PROXY_EXTERNAL_PORT }}/dashboard`
+  * Operations Command Center: `http://{{ HYPERVISOR_HOST }}:{{ PROXY_EXTERNAL_PORT }}/operations`
+  * Health Diagnostics: `http://{{ HYPERVISOR_HOST }}:{{ PROXY_EXTERNAL_PORT }}/api/health`
+
+---
+
+## 6. Hypervisor Management & Snapshot Operations
+
+Hypervisor-level operations are managed on `{{ HYPERVISOR_HOST }}` using `virsh`:
+
+### 6.1 VM Lifecycle Commands
+```bash
+# Check VM status
+ssh {{ HYPERVISOR_HOST }} "sudo virsh list --all"
+
+# Start the VM
+ssh {{ HYPERVISOR_HOST }} "sudo virsh start {{ VM_NAME }}"
+
+# Gracefully shut down the VM
+ssh {{ HYPERVISOR_HOST }} "sudo virsh shutdown {{ VM_NAME }}"
+
+# Force stop the VM (if hung)
+ssh {{ HYPERVISOR_HOST }} "sudo virsh destroy {{ VM_NAME }}"
+```
+
+### 6.2 Snapshot & Instant Rollback
+Snapshots allow the VM to be reset to a pristine baseline state if tests or experimental container builds produce filesystem clutter:
+
+```bash
+# Create a pristine baseline disk snapshot (UEFI domain)
+ssh {{ HYPERVISOR_HOST }} "sudo virsh snapshot-create-as --domain {{ VM_NAME }} --name {{ SNAPSHOT_BASE_NAME }} --disk-only --description '{{ SNAPSHOT_BASE_DESC }}'"
+
+# List available snapshots
+ssh {{ HYPERVISOR_HOST }} "sudo virsh snapshot-list {{ VM_NAME }}"
+
+# Revert to baseline snapshot (shut down domain before reverting disk snapshot if required)
+ssh {{ HYPERVISOR_HOST }} "sudo virsh snapshot-revert {{ VM_NAME }} {{ SNAPSHOT_BASE_NAME }}"
+```
+
+---
+
+## 7. Security & Isolation Invariants
+
+1. **Host Guardrails**:
+   * No application code, browser instances, or automated crawler loops run directly on `{{ DEV_HOST }}`.
+   * Staging credentials and test tokens reside only inside the isolated execution memory of `{{ VM_NAME }}`.
+2. **Container Isolation Inside Guest**:
+   * Each persona/profile review executes within its own ephemeral container on `{{ VM_NAME }}`.
+   * Containers have no write access to the guest VM's root filesystem and terminate upon audit completion.

@@ -1,0 +1,35 @@
+# Generated documentation & local runbooks
+docs/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Configuration overrides & local secrets
+*.local.json
+my_env.json
+my_devbox.json
+*.env
+*.env.local
+
+# IDE & Editor artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Logs & temp outputs
+*.log
+/tmp/
