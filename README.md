@@ -49,7 +49,10 @@ By strictly separating software engineering workstations from runtime execution 
 ```text
 .
 ├── README.md                                # Project documentation
-├── docs/
+├── CONTRIBUTING.md                          # Contribution guidelines
+├── LICENSE                                  # MIT License
+├── install_skill.sh                         # Skill installer & updater script
+├── docs/                                    # Generated runbooks (git-ignored)
 │   ├── ARCHITECTURE.md                      # Security model and isolation topology
 │   └── DEVELOPMENT_VM.md                    # Generated VM execution runbook
 ├── .agents/skills/devbox_configure/
@@ -62,6 +65,23 @@ By strictly separating software engineering workstations from runtime execution 
 │       ├── probe_hypervisor.py              # Hypervisor discovery and capability checker
 │       └── verify_config.py                 # Template coverage and syntax validator
 └── .gitignore
+```
+
+---
+
+## Installation & Skill Setup
+
+You can install or update the `devbox_configure` skill into any repository or globally across your development environment using `install_skill.sh`:
+
+```bash
+# Option A: Install into current repository (.agents/skills/devbox_configure)
+./install_skill.sh
+
+# Option B: One-line install/update directly from GitHub
+curl -fsSL https://raw.githubusercontent.com/SimplyBarter/DevBox/main/install_skill.sh | bash
+
+# Option C: Install globally for all projects (~/.agents/skills/devbox_configure)
+./install_skill.sh --global
 ```
 
 ---

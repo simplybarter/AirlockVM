@@ -17,7 +17,19 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
 DEFAULTS_PATH = SKILL_DIR / "template" / "defaults.json"
-REPO_ROOT = SKILL_DIR.parents[2].resolve()
+
+
+def find_repo_root() -> Path:
+    if len(SKILL_DIR.parents) >= 3 and SKILL_DIR.parents[1].name == ".agents":
+        return SKILL_DIR.parents[2].resolve()
+    cwd = Path.cwd().resolve()
+    for p in [cwd] + list(cwd.parents):
+        if (p / ".git").exists() or (p / ".agents").exists():
+            return p
+    return cwd
+
+
+REPO_ROOT = find_repo_root()
 DEFAULT_PROJECT_NAME = REPO_ROOT.name
 
 

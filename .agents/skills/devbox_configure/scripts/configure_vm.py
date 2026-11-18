@@ -15,10 +15,19 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
 DEFAULT_TEMPLATE_PATH = SKILL_DIR / "template" / "DEVELOPMENT_VM.md.template"
 DEFAULT_CONFIG_PATH = SKILL_DIR / "template" / "defaults.json"
-# SCRIPT_DIR: .agents/skills/devbox_configure/scripts
-# SKILL_DIR: .agents/skills/devbox_configure
-# SKILL_DIR.parents[2] is the workspace root
-REPO_ROOT = SKILL_DIR.parents[2].resolve()
+
+
+def find_repo_root() -> Path:
+    if len(SKILL_DIR.parents) >= 3 and SKILL_DIR.parents[1].name == ".agents":
+        return SKILL_DIR.parents[2].resolve()
+    cwd = Path.cwd().resolve()
+    for p in [cwd] + list(cwd.parents):
+        if (p / ".git").exists() or (p / ".agents").exists():
+            return p
+    return cwd
+
+
+REPO_ROOT = find_repo_root()
 DEFAULT_PROJECT_NAME = REPO_ROOT.name
 DEFAULT_OUTPUT_PATH = REPO_ROOT / "docs" / "DEVELOPMENT_VM.md"
 
