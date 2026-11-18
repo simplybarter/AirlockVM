@@ -139,7 +139,7 @@ If any check fails, the tool stops immediately and displays actionable troublesh
 
 ## AI Agent Integration
 
-This repository includes a skill definition compatible with Google Antigravity and coding assistants. Agents can trigger this workflow using the slash command:
+This repository includes a skill definition compatible with coding assistants. Agents can trigger this workflow using the slash command:
 
 ```text
 /devbox_configure
