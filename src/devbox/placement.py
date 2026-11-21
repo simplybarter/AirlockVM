@@ -132,6 +132,7 @@ def select_optimal_hypervisor(
         return {
             "success": True,
             "selected_host": best["vmhost"],
+            "selected_hypervisor": best["vmhost"],
             "warning": "None of the hypervisors strictly met all requested headroom limits; selected host with highest remaining RAM.",
             "metrics": best,
             "all_hosts": candidates,
@@ -143,6 +144,7 @@ def select_optimal_hypervisor(
     return {
         "success": True,
         "selected_host": best_host["vmhost"],
+        "selected_hypervisor": best_host["vmhost"],
         "placement_score": best_score,
         "metrics": best_host,
         "all_hosts": candidates,

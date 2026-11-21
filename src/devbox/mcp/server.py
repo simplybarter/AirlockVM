@@ -80,10 +80,14 @@ def _run_command(cmd: list[str], timeout: int = 120) -> dict[str, Any]:
 
 def _find_vm_yaml(vm_name: str) -> tuple[Path | None, dict[str, Any] | None]:
     """Locates vm.yaml for a given VM domain name across inventory."""
-    if not INVENTORY_DIR.exists():
+    if not INVENTORY_DIR.exists() or not vm_name:
         return None, None
 
-    for candidate in INVENTORY_DIR.glob(f"*/{vm_name}/vm.yaml"):
+    name_str = str(vm_name).strip()
+    if not name_str:
+        return None, None
+
+    for candidate in INVENTORY_DIR.glob(f"*/{name_str}/vm.yaml"):
         try:
             with open(candidate, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
@@ -93,7 +97,7 @@ def _find_vm_yaml(vm_name: str) -> tuple[Path | None, dict[str, Any] | None]:
 
     # Case-insensitive fallback
     for candidate in INVENTORY_DIR.glob("*/*/vm.yaml"):
-        if candidate.parent.name.lower() == vm_name.lower():
+        if candidate.parent.name.lower() == name_str.lower():
             try:
                 with open(candidate, "r", encoding="utf-8") as f:
                     data = yaml.safe_load(f) or {}
@@ -184,38 +188,46 @@ def devbox_detect_app(local_path: str) -> dict[str, Any]:
 
 @server.tool()
 def devbox_find_port(
-    vm_name: str,
+    vm_name: str = "",
     internal_port: int = 3000,
     preferred_port: int = 0,
+    vmhost: str = "",
 ) -> dict[str, Any]:
     """Audits both inventory reservations and live hypervisor TCP sockets over SSH to discover the next available external port.
 
     Args:
-        vm_name: Domain name of the target VM in inventory.
+        vm_name: Optional domain name of the target VM in inventory.
         internal_port: Internal application listening port (e.g. 3000, 8080).
         preferred_port: Optional preferred external port to check (default 0 for auto).
+        vmhost: Target hypervisor host (auto-detected if omitted).
     """
-    yaml_path, doc = _find_vm_yaml(vm_name)
-    if not yaml_path or not doc:
-        return {
-            "success": False,
-            "error": f"Target VM '{vm_name}' not found in inventory.",
-        }
+    # Handle case where user or caller passed an integer as first positional argument
+    if isinstance(vm_name, int) or (isinstance(vm_name, str) and vm_name.isdigit()):
+        internal_port = int(vm_name)
+        vm_name = ""
 
-    vm_data = doc.get("vm", {})
-    vmhost = vm_data.get("host", "localhost")
+    target_host = vmhost
+    if vm_name:
+        yaml_path, doc = _find_vm_yaml(vm_name)
+        if yaml_path and doc:
+            target_host = doc.get("vm", {}).get("host", target_host)
+
+    if not target_host:
+        hosts = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()]
+        target_host = hosts[0] if hosts else "barkley"
+
     pref = preferred_port if preferred_port > 0 else None
 
     port, reason = allocate_external_port(
-        vmhost=vmhost,
+        vmhost=target_host,
         internal_port=internal_port,
         preferred_port=pref,
     )
 
     return {
         "success": True,
-        "vm_name": vm_name,
-        "host": vmhost,
+        "vm_name": vm_name or "unassigned",
+        "host": target_host,
         "internal_port": internal_port,
         "allocated_external_port": port,
         "message": reason,
@@ -223,13 +235,17 @@ def devbox_find_port(
 
 
 @server.tool()
-def devbox_alloc_network(vmhost: str, network_name: str = "default") -> dict[str, Any]:
+def devbox_alloc_network(vmhost: str = "", network_name: str = "default") -> dict[str, Any]:
     """Allocates the next available collision-free static IP address and unique MAC address on virbr0.
 
     Args:
-        vmhost: Target hypervisor host name in inventory (e.g. 'barkley' or 'localhost').
+        vmhost: Target hypervisor host name in inventory (e.g. 'barkley' or 'localhost'). Defaults to first registered host.
         network_name: Libvirt network name (defaults to 'default').
     """
+    if not vmhost:
+        hosts = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()]
+        vmhost = hosts[0] if hosts else "barkley"
+
     return allocate_vm_network(vmhost=vmhost, network_name=network_name)
 
 
@@ -447,8 +463,8 @@ def devbox_create_vm(
             required_ram_mib=memory_mib,
             required_disk_gb=disk_gib,
         )
-        if placement.get("success") and placement.get("selected_hypervisor"):
-            vmhost = placement["selected_hypervisor"]
+        if placement.get("success") and (placement.get("selected_hypervisor") or placement.get("selected_host")):
+            vmhost = placement.get("selected_hypervisor") or placement.get("selected_host")
         else:
             hosts = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()]
             vmhost = hosts[0] if hosts else "barkley"

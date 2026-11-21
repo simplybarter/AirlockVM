@@ -152,13 +152,27 @@ def detect_application(local_path: str | Path) -> dict[str, Any]:
         compose_file = "compose.yaml" if (path / "compose.yaml").exists() else "docker-compose.yml"
         detected_files.append(compose_file)
         framework = f"{framework} + Docker Compose"
+        try:
+            cf_content = (path / compose_file).read_text(encoding="utf-8")
+            port_match = re.search(r"-\s*[\"']?(\d+):(\d+)[\"']?", cf_content)
+            if port_match:
+                internal_port = int(port_match.group(2))
+        except Exception:
+            pass
         post_deploy = "docker compose up -d"
         confidence = "high"
     elif (path / "Dockerfile").exists() and not post_deploy:
         detected_files.append("Dockerfile")
         framework = "Docker"
+        try:
+            df_content = (path / "Dockerfile").read_text(encoding="utf-8")
+            expose_match = re.search(r"^\s*EXPOSE\s+(\d+)", df_content, re.MULTILINE | re.IGNORECASE)
+            if expose_match:
+                internal_port = int(expose_match.group(1))
+        except Exception:
+            pass
         post_deploy = f"docker build -t {app_name.lower()} . && docker run -d -p {internal_port}:{internal_port} {app_name.lower()}"
-        confidence = "medium"
+        confidence = "high"
 
     # Override internal port if .env explicitly defined PORT
     if env_port is not None:

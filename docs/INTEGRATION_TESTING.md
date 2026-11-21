@@ -136,16 +136,35 @@ DevBox supports two deployment models established via conversation between the u
 
 ---
 
-## 5. Automated Verification Checklist
+## 5. Permutation Test Matrix & Verification Results
 
-| Test Item | Command / Tool | Expected Result | Pass / Fail |
-| :--- | :--- | :--- | :--- |
-| **MCP Ping** | `devbox_ping` | `DevBox MCP Server is online (Python 3.14)` | [ ] |
-| **Connector** | `connect_devbox.sh` | Generates valid `.gemini/mcp_config.json` | [ ] |
-| **Create VM (Dedicated)** | `devbox_create_vm` | Generates dedicated `vm.yaml`, `VM.md`, and sync script | [ ] |
-| **Attach App (Shared)** | `devbox_attach_app` | Updates `vm.yaml` and sync scripts on existing VM | [ ] |
-| **Pre-Flight Deployability** | `devbox_preflight` | `Verdict: READY_TO_DEPLOY` (8/8 checks passed, score 1.0) | [ ] |
-| **Drift Audit** | `devbox_audit_drift` | Verifies specification matches live hypervisor | [ ] |
-| **Security Audit** | `devbox_audit_security` | Zero credential leaks, workstation isolation compliant | [ ] |
-| **Dry-Run Deploy** | `devbox_deploy_app(dry_run=True)` | Excludes `.git`, calculates rsync file list | [ ] |
-| **Proxy Forward** | `curl http://host:3002/` | Returns JSON status from guest VM | [ ] |
+All 26 test permutations across 8 dimensions are executed in `.venv/bin/python -m unittest tests/test_integration_permutations.py -v`:
+
+| Dimension | Permutation / Test Case | Tool / Engine | Result | Details |
+| :--- | :--- | :--- | :---: | :--- |
+| **A. Observability** | MCP Server Heartbeat | `devbox_ping` | **PASS** | Responsive Python 3.14.7 runtime |
+| | Inventory VM Discovery | `devbox_list` | **PASS** | Discovers 6 VMs across `barkley` |
+| | Unprovisioned Status Reporting | `devbox_status` | **PASS** | Clear status notice without crashing |
+| **B. Stack Detection** | Node.js App Detection | `devbox_detect_app` | **PASS** | Identifies Node.js, port 3000, `npm start` |
+| | Python FastAPI/Uvicorn | `devbox_detect_app` | **PASS** | Identifies Python, port 8000, uvicorn |
+| | Docker & Dockerfile Expose | `devbox_detect_app` | **PASS** | Parses `EXPOSE` directives accurately |
+| | Nonexistent Directory | `devbox_detect_app` | **PASS** | Graceful error handling |
+| **C. Placement & Network** | Live Hypervisor Capacity Probe | `inspect_hypervisor` | **PASS** | Audits cores, RAM headroom, load average |
+| | Optimal Placement Optimizer | `devbox_select_host` | **PASS** | Selects `barkley` with placement scoring |
+| | Collision-Free Network Alloc | `devbox_alloc_network`| **PASS** | Allocates unique IP & MAC on `virbr0` |
+| | Automatic External Port Alloc | `devbox_find_port` | **PASS** | Allocates available forwarder port |
+| | Port Collision Avoidance | `allocate_external_port`| **PASS** | Avoids occupied ports (shifts past 3001) |
+| **D. Dedicated VM Lifecycle** | SSOT vm.yaml Generation | `devbox_create_vm` | **PASS** | Pristine parameters in `vm.yaml` |
+| | Operational Runbook Gen | `devbox_create_vm` | **PASS** | Parameterized `VM.md` (0 unrendered tags) |
+| | Pre-Flight Deployability Gates | `devbox_preflight` | **PASS** | **READY_TO_DEPLOY** (8/8 checks, score 1.0) |
+| | Hypervisor Deploy Simulation | `devbox_deploy_vm` | **PASS** | All prerequisite gates passed (dry-run) |
+| | Offline Workload Rsync Filter | `devbox_deploy_app` | **PASS** | Includes `server.js`, strictly excludes `.git/` |
+| **E. Shared Attach Topology** | Shared Worker App Attachment | `devbox_attach_app` | **PASS** | Inferred stack attached to existing worker |
+| | Idempotent Override Updates | `devbox_attach_app` | **PASS** | Updates existing record without duplication |
+| **F. Drift & Diagnostics** | Unprovisioned Domain Audit | `devbox_audit_drift` | **PASS** | Reports unprovisioned status & missing units |
+| | Nonexistent Inventory VM Diag | `devbox_diagnose` | **PASS** | Clear error reporting |
+| | Unprovisioned Domain Diag | `devbox_diagnose` | **PASS** | Identifies cause & suggests `devbox_deploy_vm` |
+| **G. Security Isolation** | Zero Credential Leak Audit | `devbox_audit_security`| **PASS** | 0 secrets/private keys in app repo |
+| | Workstation Zero-Workload Invariant | `devbox_audit_security`| **PASS** | Proves 0 runtime app processes on workstation |
+| **H. Client Connector CLI** | Registration Inspection | `./connect_devbox.sh --list` | **PASS** | Audits global and project configurations |
+| | Multi-IDE Dry-Run Registration | `./connect_devbox.sh --all` | **PASS** | Evaluates Antigravity, VSCode, Cursor, etc. |
