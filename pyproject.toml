@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "devbox"
+version = "0.2.0"
+description = "Dedicated VM Development Environment and MCP Control Plane"
+readme = "README.md"
+requires-python = ">=3.14"
+license = { text = "MIT" }
+dependencies = [
+    "pyyaml>=6.0.1",
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+devbox-mcp = "devbox.mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/devbox"]

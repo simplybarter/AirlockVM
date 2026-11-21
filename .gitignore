@@ -6,6 +6,9 @@ inventory/
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+dist/
+build/
 
 # Virtual environments
 venv/

@@ -83,3 +83,11 @@ flowchart TD
 ### Stage 4: Workload Deployment (`devbox_rsync`)
 * **Role**: Evaluates project manifests (`package.json`, `requirements.txt`, etc.) and dynamically builds an optimized application deployment script (`deploy_app_to_vm.sh`).
 * **Boundary**: Strictly excludes local developer caches, IDE state, documentation, agent configs, and version control directories, ensuring only necessary runtime application code reaches the execution VM.
+
+---
+
+## 6. Standalone Control Plane & MCP Server
+
+To decouple infrastructure logic from application repositories, DevBox operates as a standalone **Model Context Protocol (MCP)** server:
+* AI coding agents access DevBox tools (`devbox_deploy_app`, `devbox_status`, `devbox_deploy_vm`) without installing virtualization scripts in client projects.
+* See [MCP Server Documentation](MCP_SERVER.md) for architecture, tool definitions, and integration guides.
