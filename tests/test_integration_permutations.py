@@ -399,7 +399,9 @@ class TestPermutationI_LiveDeploymentAndProxyReachability(unittest.TestCase):
             self.assertEqual(data.get("status"), "ok")
             self.assertEqual(data.get("boundHost"), "0.0.0.0")
             self.assertEqual(data.get("boundPort"), 3000)
-            self.assertEqual(data.get("message"), "Hello from DummyDevBoxApp!")
+            self.assertIn("DummyDevBoxApp", data.get("message"))
+            self.assertTrue(data.get("envLoaded"))
+            self.assertEqual(data.get("customConfig"), "DevBox-Isolated-VM-Environment")
 
     def test_live_mcp_health_check(self):
         res = srv.devbox_health_check("dummy-devbox-app-vm")

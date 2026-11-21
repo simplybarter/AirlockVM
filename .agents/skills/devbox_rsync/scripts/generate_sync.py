@@ -415,7 +415,7 @@ for entry in "${REPOSITORIES[@]}"; do
     else
       echo "[*] Executing post-deploy command on $VM_HOST (PORT=$int_port):"
       echo "    -> cd $remote_dir && export HOST=0.0.0.0 PORT=$int_port && (nohup $post_cmd > app.log 2>&1 &)"
-      ssh "$VM_HOST" "fuser -k ${int_port}/tcp 2>/dev/null || true; cd $remote_dir && export HOST=0.0.0.0 PORT=$int_port && (nohup $post_cmd > app.log 2>&1 &) && sleep 1"
+      ssh "$VM_HOST" "old_pid=\\$(ss -tlnp 'sport = :${int_port}' 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); [ -n \"\\$old_pid\" ] && kill -9 \\$old_pid 2>/dev/null || true; cd $remote_dir && export HOST=0.0.0.0 PORT=$int_port && (nohup $post_cmd > app.log 2>&1 &) && sleep 1"
       echo "[✓] Post-deploy command completed."
     fi
   fi
