@@ -73,6 +73,11 @@ The MCP server exposes standard, declarative tools enabling agents to inspect, d
 | `devbox_status` | `vm_name: str` | Queries the target VM's live status (`running`, `shut off`, etc.), current IP lease, uptime, and available disk snapshots. |
 | `devbox_detect_app` | `local_path: str` | Intelligently inspects project manifests (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `compose.yaml`) to infer framework, internal port, and `post_deploy` command. |
 | `devbox_health_check` | `vm_name: str`<br/>`app_name: str = ""` <br/>`path: str = "/"` | Probes the live hypervisor route with retries. If failing or crashing, automatically connects to the VM over SSH and captures runtime logs for instant diagnosis. |
+| `devbox_diagnose` | `vm_name: str`<br/>`app_name: str = ""` | Multi-layer crash diagnostic engine: inspects guest journal logs, internal port listeners, hypervisor proxy sockets, and detects root causes with actionable remediation. |
+| `devbox_audit_drift` | `vm_name: str` | Audits live hypervisor domain and systemd proxy state against inventory SSOT, detecting discrepancies in vCPU, RAM, MAC address, and state. |
+| `devbox_reconcile` | `vm_name: str`<br/>`strategy: str = "refresh_inventory"` | Reconciles detected drift between inventory SSOT and live hypervisor. |
+| `devbox_profile_workload` | `vm_name: str`<br/>`duration_sec: int = 2` | Measures real-time CPU, RAM, swap, and process load inside a running VM and computes rightsizing guidance to reclaim hypervisor resources. |
+| `devbox_audit_security` | `vm_name: str`<br/>`app_name: str = ""` | Audits isolation boundaries: verifies zero secret/key leaks on guest VM, checks AppArmor confinement, and confirms zero workload processes on workstation. |
 | `devbox_ping` | *(none)* | Health check verifying that the MCP server and Python 3.14 runtime are responsive. |
 
 ### 3.2. Sizing, Placement & Network Automation
@@ -97,6 +102,7 @@ The MCP server exposes standard, declarative tools enabling agents to inspect, d
 | :--- | :--- | :--- |
 | `devbox_create_vm` | `local_path: str`<br/>`vmhost: str = ""` <br/>`vm_name: str = ""` <br/>`app_name: str = ""` <br/>`internal_port: int = 0`<br/>`external_port: int = 0`<br/>`post_deploy: str = ""` <br/>`vcpu: int = 4`<br/>`memory_mib: int = 2048`<br/>`disk_gib: int = 50` | Generates a new dedicated execution virtual machine specification and runbook in `inventory/{vmhost}/{vm}/` for an application. Auto-detects stack/ports/commands, selects optimal hypervisor, allocates static IP/MAC and conflict-free proxy ports, and regenerates sync scripts. |
 | `devbox_attach_app` | `vm_name: str`<br/>`local_path: str`<br/>`app_name: str = ""` <br/>`internal_port: int = 0`<br/>`external_port: int = 0`<br/>`post_deploy: str = ""` | Registers or updates an application repository in an existing `inventory/{vmhost}/{vm}/vm.yaml`. Auto-detects stack/ports/commands if omitted, and auto-allocates conflict-free host ports. |
+| `devbox_preflight` | `vm_name: str` | Non-destructive pre-flight deployability confirmation: live probe of SSH/sudo, /dev/kvm, libvirtd, IP silence, port conflicts, disk headroom, and host RAM safety. Returns verdict (`READY_TO_DEPLOY` / `BLOCKED`) with confidence score. |
 | `devbox_deploy_vm` | `vm_name: str`<br/>`dry_run: bool = False` | Enforces pre-flight capability checks and provisions/updates the VM domain: SSH key generation, static DHCP reservations on `virbr0`, cloud-init NoCloud ISO seeding, `virt-install`, and hypervisor `systemd-socket-proxyd` forwarders for all mapped repository ports. |
 | `devbox_deploy_app` | `vm_name: str`<br/>`app_name: str = ""` <br/>`dry_run: bool = False`<br/>`no_restart: bool = False`<br/>`offline: bool = False`<br/>`checkpoint: bool = False`<br/>`verify_health: bool = False` | Synchronizes application source code to the target VM using `deploy_app_to_vm.sh`. Optionally creates safety snapshot checkpoints and verifies HTTP route health post-deploy. |
 

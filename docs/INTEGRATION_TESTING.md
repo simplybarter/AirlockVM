@@ -85,6 +85,17 @@ DevBox supports two deployment models established via conversation between the u
 
 ---
 
+### Phase 2.5: Pre-Flight Deployability Confirmation (`devbox_preflight`)
+* **Action**: Invoke the MCP tool `devbox_preflight(vm_name="dummy-devbox-app-vm")`:
+* **Success Criteria**:
+  - Live probe confirms SSH connectivity, `/dev/kvm` acceleration, and `virsh` responsiveness.
+  - Verifies target static IP (`192.168.122.231`) is completely silent (no ARP/ICMP collision).
+  - Verifies target external forwarder port (`3002`) is not listening on the hypervisor.
+  - Audits storage pool headroom (≥50 GiB) and predicts host RAM safety headroom.
+  - Returns verdict `READY_TO_DEPLOY` with confidence score `1.0` (8/8 checks passed).
+
+---
+
 ### Phase 3: Hypervisor Proxy Provisioning (`devbox_deploy_vm`)
 * **Action**: Invoke the MCP tool `devbox_deploy_vm(vm_name="dummy-devbox-app-vm", dry_run=True)`:
 * **Success Criteria**:
@@ -133,5 +144,8 @@ DevBox supports two deployment models established via conversation between the u
 | **Connector** | `connect_devbox.sh` | Generates valid `.gemini/mcp_config.json` | [ ] |
 | **Create VM (Dedicated)** | `devbox_create_vm` | Generates dedicated `vm.yaml`, `VM.md`, and sync script | [ ] |
 | **Attach App (Shared)** | `devbox_attach_app` | Updates `vm.yaml` and sync scripts on existing VM | [ ] |
+| **Pre-Flight Deployability** | `devbox_preflight` | `Verdict: READY_TO_DEPLOY` (8/8 checks passed, score 1.0) | [ ] |
+| **Drift Audit** | `devbox_audit_drift` | Verifies specification matches live hypervisor | [ ] |
+| **Security Audit** | `devbox_audit_security` | Zero credential leaks, workstation isolation compliant | [ ] |
 | **Dry-Run Deploy** | `devbox_deploy_app(dry_run=True)` | Excludes `.git`, calculates rsync file list | [ ] |
-| **Proxy Forward** | `curl http://host:3003/` | Returns JSON status from guest VM | [ ] |
+| **Proxy Forward** | `curl http://host:3002/` | Returns JSON status from guest VM | [ ] |

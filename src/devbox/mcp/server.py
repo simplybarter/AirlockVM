@@ -19,10 +19,15 @@ import yaml
 from mcp.server.mcpserver import MCPServer
 
 from devbox.detector import detect_application
+from devbox.diagnostics import diagnose_workload_failure
+from devbox.drift import audit_vm_drift, reconcile_vm_drift
 from devbox.health import verify_route_health
 from devbox.network import allocate_vm_network
 from devbox.placement import inspect_hypervisor, select_optimal_hypervisor
 from devbox.ports import allocate_external_port, get_inventory_used_ports, get_hypervisor_live_ports
+from devbox.preflight import validate_deployment_preflight
+from devbox.profiler import profile_workload
+from devbox.security import audit_vm_security
 from devbox.snapshots import create_pre_deploy_checkpoint, rollback_checkpoint
 
 # DevBox canonical root directory
@@ -293,6 +298,20 @@ def devbox_health_check(
 
 
 @server.tool()
+def devbox_diagnose(vm_name: str, app_name: str = "") -> dict[str, Any]:
+    """Performs deep failure diagnosis when an application fails to start or respond.
+
+    Audits domain state, hypervisor proxy unit, guest internal port listeners,
+    and runtime journal errors to isolate the root cause and propose remediation.
+
+    Args:
+        vm_name: Target VM domain name in inventory.
+        app_name: Optional application name.
+    """
+    return diagnose_workload_failure(vm_name=vm_name, app_name=app_name)
+
+
+@server.tool()
 def devbox_checkpoint(
     vm_name: str,
     action: str = "create",
@@ -311,6 +330,54 @@ def devbox_checkpoint(
         return rollback_checkpoint(vm_name, snapshot_name=snapshot_name)
     else:
         return {"success": False, "error": "Action must be 'create' or 'revert'."}
+
+
+@server.tool()
+def devbox_audit_drift(vm_name: str) -> dict[str, Any]:
+    """Audits live hypervisor domain and systemd proxy socket state against inventory SSOT.
+
+    Detects discrepancies in execution state, vCPUs, RAM allocation, MAC address, and proxy units.
+
+    Args:
+        vm_name: Target VM domain name in inventory.
+    """
+    return audit_vm_drift(vm_name)
+
+
+@server.tool()
+def devbox_reconcile(vm_name: str, strategy: str = "refresh_inventory") -> dict[str, Any]:
+    """Reconciles detected drift between inventory SSOT and live hypervisor.
+
+    Args:
+        vm_name: Target VM domain name.
+        strategy: 'refresh_inventory' (updates vm.yaml from live state) or 'enforce_specification' (applies vm.yaml to hypervisor).
+    """
+    return reconcile_vm_drift(vm_name, strategy=strategy)
+
+
+@server.tool()
+def devbox_profile_workload(vm_name: str, duration_sec: int = 2) -> dict[str, Any]:
+    """Measures real-time CPU, RAM, swap, and process load inside a running VM and computes rightsizing recommendations.
+
+    Args:
+        vm_name: Target VM domain name in inventory.
+        duration_sec: Sampling window in seconds (default 2).
+    """
+    return profile_workload(vm_name=vm_name, duration_sec=duration_sec)
+
+
+@server.tool()
+def devbox_audit_security(vm_name: str, app_name: str = "") -> dict[str, Any]:
+    """Audits security isolation boundaries across development workstation and guest VM.
+
+    Verifies zero credentials/secrets leaked into guest, audits AppArmor confinement,
+    and confirms zero workload processes running on local workstation.
+
+    Args:
+        vm_name: Target VM domain name in inventory.
+        app_name: Optional application name.
+    """
+    return audit_vm_security(vm_name=vm_name, app_name=app_name)
 
 
 # ==============================================================================
@@ -642,6 +709,26 @@ def devbox_attach_app(
         "sync_generator": sync_res.get("stdout", ""),
         "message": f"Repository '{app_name}' successfully attached to VM '{vm_name}'. {alloc_reason}",
     }
+
+
+@server.tool()
+def devbox_preflight(vm_name: str) -> dict[str, Any]:
+    """Audits live hypervisor state to confirm that a VM specification is ready to be deployed.
+
+    Verifies:
+    1. SSH and passwordless sudo on hypervisor.
+    2. Hardware virtualization (/dev/kvm present and writable).
+    3. Libvirt daemon responsiveness.
+    4. Static IP silence (ensures target IP is not actively occupied).
+    5. Hypervisor proxy port availability.
+    6. Storage pool headroom on backing disk.
+    7. Host RAM safety headroom.
+    8. Base cloud image cache status.
+
+    Args:
+        vm_name: Target VM domain name in inventory.
+    """
+    return validate_deployment_preflight(vm_name=vm_name)
 
 
 @server.tool()
