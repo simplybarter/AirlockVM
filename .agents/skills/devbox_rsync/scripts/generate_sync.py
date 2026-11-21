@@ -103,6 +103,7 @@ def evaluate_project_exclusions() -> list[str]:
         "deploy_app_to_vm.sh",
         "sync_to_devbox.sh",
         "install_skill.sh",
+        "connect_devbox.sh",
         # Local secrets and environment overrides
         ".env*.local",
         "*.local.json",
@@ -199,6 +200,8 @@ REPOSITORIES=(
 __REPOSITORY_ENTRIES__
 )
 
+TARGET_REPO=""
+
 show_help() {
   cat <<EOF
 Usage: $0 [OPTIONS]
@@ -218,6 +221,7 @@ $(for entry in "${REPOSITORIES[@]}"; do
 done)
 
 Options:
+  -r, --repo <name>      Sync only a specific repository (alias: --only)
   -o, --offline          Show local file inventory only (offline, 0 network calls)
   -n, --dry-run          Preview local inventory & remote changes without modifying files
   -d, --delete           Delete files in destination that no longer exist locally
@@ -231,6 +235,10 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -r|--repo|--only)
+      TARGET_REPO="$2"
+      shift 2
+      ;;
     -o|--offline)
       OFFLINE_ONLY=true
       shift
@@ -278,6 +286,9 @@ if [[ "$DRY_RUN" == "true" || "$OFFLINE_ONLY" == "true" ]]; then
   for entry in "${REPOSITORIES[@]}"; do
     IFS='|' read -r rname lpath rpath post_cmd <<< "$entry"
     post_cmd="${post_cmd:-}"
+    if [[ -n "$TARGET_REPO" && "$rname" != "$TARGET_REPO" ]]; then
+      continue
+    fi
     echo "[*] Repository '$rname': $lpath"
     if [[ ! -d "$lpath" ]]; then
       echo "    [-] WARNING: Local directory does not exist: $lpath"
@@ -369,6 +380,9 @@ for entry in "${REPOSITORIES[@]}"; do
   post_cmd="${post_cmd:-}"
   int_port="${int_port:-3000}"
   ext_port="${ext_port:-3001}"
+  if [[ -n "$TARGET_REPO" && "$rname" != "$TARGET_REPO" ]]; then
+    continue
+  fi
   echo ""
   echo "------------------------------------------------------------"
   echo " Synchronizing '$rname': $lpath -> $VM_HOST:$rpath"
