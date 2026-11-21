@@ -138,7 +138,7 @@ DevBox supports two deployment models established via conversation between the u
 
 ## 5. Permutation Test Matrix & Verification Results
 
-All 26 test permutations across 8 dimensions are executed in `.venv/bin/python -m unittest tests/test_integration_permutations.py -v`:
+All 34 test permutations across 9 dimensions are executed in `.venv/bin/python -m unittest tests/test_integration_permutations.py -v`:
 
 | Dimension | Permutation / Test Case | Tool / Engine | Result | Details |
 | :--- | :--- | :--- | :---: | :--- |
@@ -157,14 +157,23 @@ All 26 test permutations across 8 dimensions are executed in `.venv/bin/python -
 | **D. Dedicated VM Lifecycle** | SSOT vm.yaml Generation | `devbox_create_vm` | **PASS** | Pristine parameters in `vm.yaml` |
 | | Operational Runbook Gen | `devbox_create_vm` | **PASS** | Parameterized `VM.md` (0 unrendered tags) |
 | | Pre-Flight Deployability Gates | `devbox_preflight` | **PASS** | **READY_TO_DEPLOY** (8/8 checks, score 1.0) |
+| | Pre-Flight Collision Detection | `devbox_preflight` | **PASS** | **BLOCKED** on occupied IP/port to prevent overwrites |
 | | Hypervisor Deploy Simulation | `devbox_deploy_vm` | **PASS** | All prerequisite gates passed (dry-run) |
 | | Offline Workload Rsync Filter | `devbox_deploy_app` | **PASS** | Includes `server.js`, strictly excludes `.git/` |
 | **E. Shared Attach Topology** | Shared Worker App Attachment | `devbox_attach_app` | **PASS** | Inferred stack attached to existing worker |
 | | Idempotent Override Updates | `devbox_attach_app` | **PASS** | Updates existing record without duplication |
-| **F. Drift & Diagnostics** | Unprovisioned Domain Audit | `devbox_audit_drift` | **PASS** | Reports unprovisioned status & missing units |
+| **F. Drift & Diagnostics** | Live VM Zero-Drift Audit | `devbox_audit_drift` | **PASS** | Confirms live domain & proxies match SSOT |
+| | Unprovisioned Domain Audit | `devbox_audit_drift` | **PASS** | Reports unprovisioned status & missing units |
 | | Nonexistent Inventory VM Diag | `devbox_diagnose` | **PASS** | Clear error reporting |
+| | Powered-Off Domain Diag | `devbox_diagnose` | **PASS** | Identifies `VM_POWERED_OFF` & suggests `devbox_power` |
 | | Unprovisioned Domain Diag | `devbox_diagnose` | **PASS** | Identifies cause & suggests `devbox_deploy_vm` |
+| | Live Running Domain Diag | `devbox_diagnose` | **PASS** | Confirms active state, port 3000, rollback enabled |
 | **G. Security Isolation** | Zero Credential Leak Audit | `devbox_audit_security`| **PASS** | 0 secrets/private keys in app repo |
 | | Workstation Zero-Workload Invariant | `devbox_audit_security`| **PASS** | Proves 0 runtime app processes on workstation |
 | **H. Client Connector CLI** | Registration Inspection | `./connect_devbox.sh --list` | **PASS** | Audits global and project configurations |
 | | Multi-IDE Dry-Run Registration | `./connect_devbox.sh --all` | **PASS** | Evaluates Antigravity, VSCode, Cursor, etc. |
+| | Single-Platform Target Reg | `./connect_devbox.sh --cursor` | **PASS** | Targets selected client IDE |
+| **I. Live Deploy & Proxy** | Hypervisor Proxy Reachability | `curl http://barkley:3002/` | **PASS** | **HTTP 200 OK**, payload `{status: "ok", port: 3000}` |
+| | Live MCP Route Health Check | `devbox_health_check` | **PASS** | Confirms `healthy: true` via proxy forwarder |
+| | Live Workload Profiler | `devbox_profile_workload`| **PASS** | Real-time CPU, RAM, and `node server.js` profiling |
+| | Live Domain Status Check | `devbox_status` | **PASS** | Confirms domain `running` on hypervisor |

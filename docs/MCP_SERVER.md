@@ -174,7 +174,7 @@ DevBox enforces strict security boundaries between the developer workstation, cl
 
 ## 6. Integration Testing & Permutation Coverage
 
-Every tool and sub-engine exposed by the DevBox MCP Server is verified through an automated 26-permutation test suite (`tests/test_integration_permutations.py`):
+Every tool and sub-engine exposed by the DevBox MCP Server is verified through an automated 34-permutation test suite (`tests/test_integration_permutations.py`):
 
 ```bash
 # Execute full MCP server permutation suite:

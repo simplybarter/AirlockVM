@@ -256,7 +256,7 @@ If any check fails, the tool stops immediately and displays actionable troublesh
 
 ## Integration Testing & Permutation Matrix
 
-DevBox includes a full 26-permutation integration test suite covering observability, stack detection, placement, dedicated VM lifecycles, shared attach idempotency, drift detection, diagnostics, security isolation, and multi-IDE CLI connectors:
+DevBox includes a full 34-permutation integration test suite covering observability, stack detection, placement, dedicated VM lifecycles, shared attach idempotency, drift detection, diagnostics, security isolation, multi-IDE CLI connectors, and live hypervisor proxy reachability:
 
 ```bash
 # Run the complete test suite:

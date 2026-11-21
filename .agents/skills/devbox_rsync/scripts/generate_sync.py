@@ -395,8 +395,9 @@ for entry in "${REPOSITORIES[@]}"; do
   fi
 
   # Ensure remote destination directory exists before syncing
+  remote_dir="${rpath/#~/\\$HOME}"
   if [[ "$DRY_RUN" != "true" ]]; then
-    ssh -q "$VM_HOST" "mkdir -p '$rpath'"
+    ssh -q "$VM_HOST" "mkdir -p $remote_dir"
   fi
 
   # Synchronize with optimized exclusions
@@ -410,11 +411,11 @@ for entry in "${REPOSITORIES[@]}"; do
     if [[ "$SKIP_POST_DEPLOY" == "true" ]]; then
       echo "    [-] Skipping post-deploy command (--no-restart enabled): $post_cmd"
     elif [[ "$DRY_RUN" == "true" ]]; then
-      echo "    [PLAN] Post-deploy on $VM_HOST (PORT=$int_port): cd '$rpath' && export HOST=0.0.0.0 PORT=$int_port && $post_cmd"
+      echo "    [PLAN] Post-deploy on $VM_HOST (PORT=$int_port): cd $remote_dir && export HOST=0.0.0.0 PORT=$int_port && $post_cmd"
     else
       echo "[*] Executing post-deploy command on $VM_HOST (PORT=$int_port):"
-      echo "    -> cd '$rpath' && export HOST=0.0.0.0 PORT=$int_port && $post_cmd"
-      ssh "$VM_HOST" "cd '$rpath' && export HOST=0.0.0.0 PORT=$int_port && $post_cmd"
+      echo "    -> cd $remote_dir && export HOST=0.0.0.0 PORT=$int_port && (nohup $post_cmd > app.log 2>&1 &)"
+      ssh "$VM_HOST" "fuser -k ${int_port}/tcp 2>/dev/null || true; cd $remote_dir && export HOST=0.0.0.0 PORT=$int_port && (nohup $post_cmd > app.log 2>&1 &) && sleep 1"
       echo "[✓] Post-deploy command completed."
     fi
   fi
