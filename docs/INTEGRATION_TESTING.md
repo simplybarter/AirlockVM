@@ -37,8 +37,11 @@ The primary goal of integration testing is to verify that an external, decoupled
 
 ```mermaid
 flowchart TD
-    P1["Phase 1: Client Project Onboarding<br/>(connect_devbox.sh --target DummyDevBoxApp)"] --> P2["Phase 2: Repository Registration<br/>(MCP: devbox_attach_app)"]
-    P2 --> P3["Phase 3: Hypervisor Proxy Alignment<br/>(MCP: devbox_deploy_vm)"]
+    P1["Phase 1: Client Project Onboarding<br/>(connect_devbox.sh --target DummyDevBoxApp)"] --> Strategy{"Strategy Conversation:<br/>Dedicated VM or Shared Attach?"}
+    Strategy -->|Dedicated VM| P2A["Phase 2A: New Dedicated VM<br/>(MCP: devbox_create_vm)"]
+    Strategy -->|Shared Attach| P2B["Phase 2B: Attach to Existing VM<br/>(MCP: devbox_attach_app)"]
+    P2A --> P3["Phase 3: Hypervisor Provisioning & Proxies<br/>(MCP: devbox_deploy_vm)"]
+    P2B --> P3
     P3 --> P4["Phase 4: Application Sync & Launch<br/>(MCP: devbox_deploy_app)"]
     P4 --> P5["Phase 5: Telemetry & Port Verification<br/>(curl http://hypervisor:external_port)"]
     P5 --> P6["Phase 6: Snapshot & Clean Rollback<br/>(MCP: devbox_snapshot revert)"]
@@ -59,38 +62,42 @@ flowchart TD
 
 ---
 
-### Phase 2: Repository Registration (`devbox_attach_app`)
-* **Action**: Invoke the MCP tool `devbox_attach_app`:
+### Phase 2: Topology Decision & VM Registration
+
+DevBox supports two deployment models established via conversation between the user, agent, and MCP server:
+* **Option A: Dedicated VM (`devbox_create_vm`)** *(Selected for DummyDevBoxApp)*: Creates an isolated, dedicated virtual machine domain (`dummydevboxapp-vm`) with dedicated static IP, MAC, SSH keys, runbook (`VM.md`), and systemd proxy forwarders.
+* **Option B: Attach to Existing VM (`devbox_attach_app`)**: Attaches the project to a shared development or staging worker (e.g. `devbox-vm`).
+
+#### Executing Phase 2A: Dedicated VM Creation (`devbox_create_vm`)
+* **Action**: Invoke the MCP tool `devbox_create_vm`:
   ```json
   {
-    "vm_name": "barkley-vm",
-    "app_name": "DummyDevBoxApp",
-    "local_path": "/path/to/DummyDevBoxApp",
-    "internal_port": 3000,
-    "external_port": 3001,
-    "post_deploy": "npm start"
+    "local_path": "/path/to/DummyDevBoxApp"
   }
   ```
 * **Success Criteria**:
-  - `inventory/barkley/barkley-vm/vm.yaml` is updated under `repositories:`.
-  - `inventory/barkley/barkley-vm/deploy_app_to_vm.sh` is regenerated with the new repository target and port mappings.
-  - Root dispatcher `deploy_app_to_vm.sh` reflects the updated VM configuration.
+  - Automatically inspects `package.json` to detect Node.js, internal port 3000, and `npm start`.
+  - Automatically allocates the next clean static IP (e.g. `192.168.122.238`) and collision-free MAC on `virbr0`.
+  - Automatically allocates a clean external forwarder port on hypervisor `barkley`.
+  - Generates `inventory/barkley/dummy-devbox-app-vm/vm.yaml` (SSOT).
+  - Generates parameterized operational runbook `inventory/barkley/dummy-devbox-app-vm/VM.md`.
+  - Generates `inventory/barkley/dummy-devbox-app-vm/deploy_app_to_vm.sh` and registers with root dispatcher.
 
 ---
 
 ### Phase 3: Hypervisor Proxy Provisioning (`devbox_deploy_vm`)
-* **Action**: Invoke the MCP tool `devbox_deploy_vm(vm_name="barkley-vm")`:
+* **Action**: Invoke the MCP tool `devbox_deploy_vm(vm_name="dummy-devbox-app-vm", dry_run=True)`:
 * **Success Criteria**:
-  - Validates pre-flight hypervisor health and VM state.
-  - Provisions the systemd socket unit `/etc/systemd/system/barkley-vm-p3001-proxy.socket` and corresponding proxy service on the hypervisor host.
-  - Hypervisor listens on port `3001` forwarding to guest IP `192.168.122.x:3000`.
+  - Validates pre-flight hypervisor health and VM specification via prerequisite gates.
+  - Provisions the systemd socket unit `/etc/systemd/system/dummy-devbox-app-vm-p3002-proxy.socket` and corresponding proxy service on the hypervisor host.
+  - Hypervisor listens on proxy external port forwarding to guest IP:3000.
 
 ---
 
 ### Phase 4: Application Deployment & Post-Deploy (`devbox_deploy_app`)
-* **Action**: Invoke the MCP tool `devbox_deploy_app(vm_name="barkley-vm", app_name="DummyDevBoxApp")`:
+* **Action**: Invoke the MCP tool `devbox_deploy_app(vm_name="dummy-devbox-app-vm")`:
 * **Success Criteria**:
-  - Rsync pushes `server.js` and `package.json` to `~/DummyDevBoxApp` on the guest VM.
+  - Rsync pushes `server.js` and `package.json` to `~/dummy-devbox-app` on the guest VM.
   - Excluded paths (`.git/`, caches, temp files) are omitted.
   - Injects `HOST=0.0.0.0` and `PORT=3000` into `post_deploy`.
   - Service launches in the guest VM execution context.
@@ -124,6 +131,7 @@ flowchart TD
 | :--- | :--- | :--- | :--- |
 | **MCP Ping** | `devbox_ping` | `DevBox MCP Server is online (Python 3.14)` | [ ] |
 | **Connector** | `connect_devbox.sh` | Generates valid `.gemini/mcp_config.json` | [ ] |
-| **Attach App** | `devbox_attach_app` | Updates `vm.yaml` and sync scripts | [ ] |
+| **Create VM (Dedicated)** | `devbox_create_vm` | Generates dedicated `vm.yaml`, `VM.md`, and sync script | [ ] |
+| **Attach App (Shared)** | `devbox_attach_app` | Updates `vm.yaml` and sync scripts on existing VM | [ ] |
 | **Dry-Run Deploy** | `devbox_deploy_app(dry_run=True)` | Excludes `.git`, calculates rsync file list | [ ] |
-| **Proxy Forward** | `curl http://host:3001/` | Returns JSON status from guest VM | [ ] |
+| **Proxy Forward** | `curl http://host:3003/` | Returns JSON status from guest VM | [ ] |

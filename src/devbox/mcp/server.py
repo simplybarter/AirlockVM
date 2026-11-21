@@ -6,11 +6,14 @@ execution virtual machines and application workloads.
 
 from __future__ import annotations
 
+import datetime
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Any
+import uuid
 import yaml
 
 from mcp.server.mcpserver import MCPServer
@@ -26,6 +29,7 @@ from devbox.snapshots import create_pre_deploy_checkpoint, rollback_checkpoint
 DEVBOX_ROOT = Path(__file__).resolve().parents[3]
 INVENTORY_DIR = DEVBOX_ROOT / "inventory"
 DEPLOY_SCRIPT = DEVBOX_ROOT / ".agents" / "skills" / "devbox_deploy" / "scripts" / "deploy_vm.py"
+CONFIGURE_SCRIPT = DEVBOX_ROOT / ".agents" / "skills" / "devbox_configure" / "scripts" / "configure_vm.py"
 GENERATE_SYNC_SCRIPT = DEVBOX_ROOT / ".agents" / "skills" / "devbox_rsync" / "scripts" / "generate_sync.py"
 ROOT_DISPATCHER = DEVBOX_ROOT / "deploy_app_to_vm.sh"
 PYTHON_BIN = DEVBOX_ROOT / ".venv" / "bin" / "python"
@@ -312,6 +316,223 @@ def devbox_checkpoint(
 # ==============================================================================
 # Workload Lifecycle & Deployment Tools
 # ==============================================================================
+
+@server.tool()
+def devbox_create_vm(
+    local_path: str,
+    vmhost: str = "",
+    vm_name: str = "",
+    app_name: str = "",
+    internal_port: int = 0,
+    external_port: int = 0,
+    post_deploy: str = "",
+    vcpu: int = 4,
+    memory_mib: int = 2048,
+    disk_gib: int = 50,
+) -> dict[str, Any]:
+    """Generates a new dedicated execution virtual machine specification and runbook in inventory/{vmhost}/{vm}/.
+
+    Automates:
+    - Tech stack and port inference from local repository manifests.
+    - Optimal hypervisor host selection if unspecified.
+    - Static DHCP IP and unique MAC reservation on virbr0.
+    - Conflict-free hypervisor proxy port allocation.
+    - inventory/{vmhost}/{vm}/vm.yaml generation (Single Source of Truth).
+    - inventory/{vmhost}/{vm}/VM.md generation (operational runbook).
+    - Synchronizing multi-VM deployment scripts via devbox_rsync.
+
+    Args:
+        local_path: Absolute or relative local path to the application repository.
+        vmhost: Target hypervisor host ('barkley', 'localhost'). Auto-selected if omitted.
+        vm_name: Target VM domain name. Derived from app_name if omitted.
+        app_name: Application display name. Inferred from manifests if omitted.
+        internal_port: Application internal listening port. Inferred if 0.
+        external_port: Hypervisor proxy forwarding port. Auto-allocated if 0.
+        post_deploy: Post-deploy startup command. Inferred if omitted.
+        vcpu: Number of virtual CPUs to allocate (default 4).
+        memory_mib: RAM allocation in MiB (default 2048).
+        disk_gib: Virtual disk storage in GiB (default 50).
+    """
+    resolved_path = Path(local_path).expanduser().resolve()
+    if not resolved_path.exists():
+        return {
+            "success": False,
+            "error": f"Local repository path does not exist: {resolved_path}",
+        }
+
+    # Auto-detect profile
+    detection = detect_application(resolved_path)
+    if not app_name:
+        app_name = detection.get("app_name", resolved_path.name)
+    if internal_port <= 0:
+        internal_port = detection.get("internal_port", 3000)
+    if not post_deploy:
+        post_deploy = detection.get("post_deploy", "")
+
+    slug = re.sub(r"[^a-z0-9]+", "-", app_name.lower()).strip("-")
+    if not vm_name:
+        vm_name = f"{slug}-vm"
+
+    # Select optimal hypervisor if not specified
+    if not vmhost:
+        placement = select_optimal_hypervisor(
+            required_vcpu=vcpu,
+            required_ram_mib=memory_mib,
+            required_disk_gb=disk_gib,
+        )
+        if placement.get("success") and placement.get("selected_hypervisor"):
+            vmhost = placement["selected_hypervisor"]
+        else:
+            hosts = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()]
+            vmhost = hosts[0] if hosts else "barkley"
+
+    # Allocate collision-free network IP & MAC
+    net_alloc = allocate_vm_network(vmhost=vmhost)
+    allocated_ip = net_alloc.get("allocated_ip", "192.168.122.238")
+    allocated_mac = net_alloc.get("allocated_mac", "52:54:00:52:2e:25")
+
+    # Allocate external port
+    pref_port = external_port if external_port > 0 else None
+    allocated_port, alloc_reason = allocate_external_port(
+        vmhost=vmhost,
+        internal_port=internal_port,
+        preferred_port=pref_port,
+        exclude_vm=vm_name,
+        exclude_app=app_name,
+    )
+
+    vm_dir = INVENTORY_DIR / vmhost / vm_name
+    vm_dir.mkdir(parents=True, exist_ok=True)
+    yaml_path = vm_dir / "vm.yaml"
+    runbook_path = vm_dir / "VM.md"
+
+    # Build SSOT YAML structure
+    now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    vm_doc = {
+        "vm": {
+            "name": vm_name,
+            "host": vmhost,
+            "state": "shut off",
+            "id": "-",
+            "uuid": str(uuid.uuid4()),
+            "os_type": "hvm",
+            "resources": {
+                "vcpu": vcpu,
+                "memory_mib": memory_mib,
+                "memory_gb": max(1, memory_mib // 1024),
+            },
+            "disks": [
+                {
+                    "device": "disk",
+                    "target": "vda",
+                    "bus": "virtio",
+                    "format": "qcow2",
+                    "source": f"/var/lib/nhr/vm/{vm_name}.snapshot-base-clean",
+                },
+                {
+                    "device": "disk",
+                    "target": "vdb",
+                    "bus": "virtio",
+                    "format": "qcow2",
+                    "source": f"/var/lib/nhr/vm/{vm_name}-seed.snapshot-base-clean",
+                },
+            ],
+            "network": {
+                "interfaces": [
+                    {
+                        "type": "network",
+                        "source": "default",
+                        "mac": allocated_mac,
+                        "ip": allocated_ip,
+                        "model": "virtio",
+                    }
+                ]
+            },
+            "security": {
+                "apparmor_profile": "unconfined",
+                "guest_agent_channel": True,
+            },
+            "blueprint": {
+                "project_name": app_name,
+                "primary_user": "devbox",
+                "secondary_user": "mother",
+                "ssh_key_path": f"~/.ssh/{slug}_vm_ed25519",
+                "app_internal_port": internal_port,
+                "proxy_external_port": allocated_port,
+                "proxy_socket_service": f"/etc/systemd/system/{slug}-proxy.socket",
+                "remote_code_dir": f"~/{slug}/",
+                "guest_os": "Ubuntu 24.04 LTS Minimal",
+                "guest_os_details": "Pristine Noble Numbat cloud image",
+                "cpu_mode": "host-passthrough",
+                "balloon_driver": "virtio-balloon",
+                "disk_size_gib": disk_gib,
+                "disk_format": "qcow2",
+                "uefi_firmware": "OVMF_CODE_4M.ms.fd",
+                "snapshot_base_name": "snapshot-base-clean",
+                "snapshot_base_desc": "Pristine base setup with Docker and Python",
+                "repositories": [
+                    {
+                        "name": app_name,
+                        "local_path": str(resolved_path),
+                        "remote_path": f"~/{slug}/",
+                        "internal_port": internal_port,
+                        "external_port": allocated_port,
+                        "post_deploy": post_deploy,
+                    }
+                ],
+            },
+            "metadata": {
+                "directory": f"inventory/{vmhost}/{vm_name}/",
+                "record_path": f"inventory/{vmhost}/{vm_name}/vm.yaml",
+                "last_discovered": now_iso,
+            },
+        }
+    }
+
+    with open(yaml_path, "w", encoding="utf-8") as f:
+        yaml.dump(vm_doc, f, sort_keys=False)
+
+    # Render VM.md runbook via configure_vm.py
+    conf_cmd = [
+        str(PYTHON_BIN),
+        str(CONFIGURE_SCRIPT),
+        "--from-inventory", vmhost,
+        "--set", f"PROJECT_NAME={app_name}",
+        "--set", f"VM_NAME={vm_name}",
+        "--set", f"VM_IP={allocated_ip}",
+        "--set", f"VM_MAC={allocated_mac}",
+        "--set", f"APP_INTERNAL_PORT={internal_port}",
+        "--set", f"PROXY_EXTERNAL_PORT={allocated_port}",
+        "--set", f"PROXY_SOCKET_SERVICE=/etc/systemd/system/{slug}-proxy.socket",
+        "--set", f"REMOTE_CODE_DIR=~/{slug}/",
+        "--set", f"SSH_KEY_PATH=~/.ssh/{slug}_vm_ed25519",
+        "--output", str(runbook_path),
+    ]
+    conf_res = _run_command(conf_cmd)
+
+    # Regenerate sync scripts
+    sync_cmd = [str(PYTHON_BIN), str(GENERATE_SYNC_SCRIPT)]
+    sync_res = _run_command(sync_cmd)
+
+    return {
+        "success": True,
+        "vm_name": vm_name,
+        "host": vmhost,
+        "app_name": app_name,
+        "config_path": str(yaml_path.relative_to(DEVBOX_ROOT)),
+        "runbook_path": str(runbook_path.relative_to(DEVBOX_ROOT)),
+        "local_path": str(resolved_path),
+        "allocated_ip": allocated_ip,
+        "allocated_mac": allocated_mac,
+        "internal_port": internal_port,
+        "external_port": allocated_port,
+        "post_deploy": post_deploy,
+        "detected_profile": detection,
+        "port_allocation_message": alloc_reason,
+        "sync_generator": sync_res.get("stdout", ""),
+        "message": f"Successfully created dedicated VM '{vm_name}' for '{app_name}' on '{vmhost}'.",
+    }
+
 
 @server.tool()
 def devbox_attach_app(
