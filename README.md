@@ -1,12 +1,12 @@
 # DevBox
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Python 3.14+](https://img.shields.io/badge/Python-3.14%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![Linux KVM](https://img.shields.io/badge/Virtualization-Linux%20KVM-orange.svg?logo=linux&logoColor=white)](https://www.linux-kvm.org/)
 [![libvirt](https://img.shields.io/badge/Hypervisor-libvirt%20%2F%20QEMU-red.svg?logo=qemu&logoColor=white)](https://libvirt.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-> **Automated Execution Virtual Machine Sizing, Runbook Generator, and Agent Skill**
+> **Dedicated Execution Virtual Machine Control Plane, Runbook Sizing, and MCP Server**
 
 [📖 Zero-Workload Use Case](USECASE.md) • [🏗 Architecture](docs/ARCHITECTURE.md) • [🔌 MCP Server](docs/MCP_SERVER.md) • [🧪 Integration Testing](docs/INTEGRATION_TESTING.md) • [⚡ Quickstart](#getting-started) • [🤝 Contributing](CONTRIBUTING.md)
 
@@ -62,60 +62,57 @@ By strictly separating software engineering workstations from runtime execution 
 ├── USECASE.md                               # Zero-workload local workstation use case guide
 ├── CONTRIBUTING.md                          # Contribution guidelines
 ├── LICENSE                                  # MIT License
-├── install_skill.sh                         # Skill installer & updater script
+├── pyproject.toml                           # Modern PEP 621 packaging & CLI entry points
+├── requirements.txt                         # Package dependencies (pyyaml, mcp)
+├── connect_devbox.sh                        # Client onboarding & MCP registration script
 ├── deploy_app_to_vm.sh                      # Multi-VM application deployment dispatcher
+├── src/devbox/                              # DevBox Python package
+│   ├── __init__.py                          # Package initialization
+│   └── mcp/                                 # Model Context Protocol service
+│       └── server.py                        # DevBox MCP Server (stdio transport)
 ├── inventory/                               # Documented hypervisors and VMs (git-ignored)
 │   └── {vmhost}/                            # VM host directory
 │       ├── vmhost.yaml                      # Documented host YAML record
 │       └── {vm}/                            # Virtual machine directory
-│           ├── vm.yaml                      # Documented VM record + blueprint
-│           └── VM.md                        # Rendered VM operational runbook
-├── docs/                                    # Project architecture and security model
-│   └── ARCHITECTURE.md                      # Security model and isolation topology
-├── .agents/skills/
-│   ├── devbox_inventory/
-│   │   ├── SKILL.md                         # Inventory discovery & management skill
-│   │   ├── template/
-│   │   │   ├── vmhost.yaml.template         # Defined host YAML template
-│   │   │   └── vm.yaml.template             # Defined VM YAML template
-│   │   └── scripts/
-│   │       ├── add_vmhost.py                # Hypervisor & VM discovery engine
-│   │       ├── inventory_manager.py         # Inventory inspection and query CLI
-│   │       └── verify_config.py             # Inventory syntax and validation linter
-│   ├── devbox_configure/
-│   │   ├── SKILL.md                         # Agent skill instructions and reference
-│   │   ├── template/
-│   │   │   └── VM.md.template               # Parameterized runbook template
-│   │   └── scripts/
-│   │       ├── configure_vm.py              # Primary customization and rendering engine
-│   │       ├── probe_hypervisor.py          # Hypervisor discovery and capability checker
-│   │       └── verify_config.py             # Template coverage and syntax validator
-│   ├── devbox_deploy/
-│   │   ├── SKILL.md                         # Virtual machine deployment skill
-│   │   └── scripts/
-│   │       └── deploy_vm.py                 # VM provisioning and lifecycle engine
-│   └── devbox_rsync/
-│       ├── SKILL.md                         # Application code synchronization skill
-│       └── scripts/
-│           └── generate_sync.py             # Sync script generator & project evaluator
+│           ├── vm.yaml                      # Documented VM record + blueprint (SSOT)
+│           ├── VM.md                        # Rendered VM operational runbook
+│           └── deploy_app_to_vm.sh          # Co-located VM sync script
+├── docs/                                    # Architecture, security & MCP documentation
+│   ├── ARCHITECTURE.md                      # Security model and isolation topology
+│   ├── MCP_SERVER.md                        # Model Context Protocol server reference
+│   └── INTEGRATION_TESTING.md               # End-to-end integration testing guide
+├── .agents/skills/                          # Core DevBox automation engines
+│   ├── devbox_inventory/                    # Hypervisor discovery and inventory management
+│   ├── devbox_configure/                    # Parameterized VM sizing and runbook generation
+│   ├── devbox_deploy/                       # Declarative VM provisioning & socket proxying
+│   └── devbox_rsync/                        # Differential application synchronization
 └── .gitignore
 ```
 
 ---
 
-## Installation & Skill Setup
+## Standalone Control Plane & MCP Integration
 
-You can install or update the DevBox agent skills (`devbox_inventory`, `devbox_configure`, `devbox_deploy`, `devbox_rsync`) into any repository or globally across your development environment using `install_skill.sh`:
+DevBox operates as a standalone infrastructure control plane. Individual application projects (e.g. `AppSurfer`, `NoHumanRequired`) do **not** need to install or maintain virtualization scripts. Instead, AI coding agents and development environments connect to DevBox via the **Model Context Protocol (MCP)**:
 
 ```bash
-# Option A: Install all skills into current repository (.agents/skills/*)
-./install_skill.sh
+# Connect a specific client application workspace:
+./connect_devbox.sh --target /path/to/my-app
 
-# Option B: One-line install/update directly from GitHub
-curl -fsSL https://raw.githubusercontent.com/SimplyBarter/DevBox/main/install_skill.sh | bash
+# Connect globally for the current user profile (~/.gemini/config/mcp_config.json):
+./connect_devbox.sh --global
+```
 
-# Option C: Install globally for all projects (~/.agents/skills/*)
-./install_skill.sh --global
+For manual MCP integration or agent harnesses, configure `.gemini/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "devbox": {
+      "command": "/path/to/DevBox/.venv/bin/devbox-mcp"
+    }
+  }
+}
 ```
 
 ---
@@ -124,8 +121,13 @@ curl -fsSL https://raw.githubusercontent.com/SimplyBarter/DevBox/main/install_sk
 
 ### Prerequisites
 
-* Python 3.10 or higher.
+* Python 3.14 or higher.
 * Linux host with KVM/QEMU and `libvirtd` (either running locally or accessible over SSH).
+* DevBox Python virtual environment configured:
+  ```bash
+  python3.14 -m venv .venv
+  .venv/bin/pip install -e .
+  ```
 
 ### 1. Document Hypervisors & VMs in Inventory
 
