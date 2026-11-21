@@ -70,19 +70,16 @@ Once the prerequisite gates pass, `deploy_vm.py` executes the automated pipeline
    * Launches the VM domain with UEFI bootloader, host-passthrough CPU mode, and VirtIO networking.
 7. **Hypervisor Port Forwarder (`systemd-socket-proxyd`)**:
    * Configures and enables `/etc/systemd/system/devbox-proxy.socket` on the hypervisor to route physical LAN traffic to the VM's internal application port with **zero processes running on your development workstation**.
-8. **Persistent Landing Page Service (`devbox-landing.service`)**:
-   * Installs and activates a lightweight systemd service inside the VM serving a modern status dashboard on `index.html`.
-   * Ensures that `http://<hypervisor>:<proxy_port>/` is immediately browsable in any browser upon deployment until project workloads run on the port.
-9. **End-to-End Proxy Validation (HTTP Roundtrip Verification)**:
-   * From your development workstation, requests the root URL `http://<hypervisor>:<proxy_port>/` through the hypervisor proxy.
-   * Verifies the HTTP 200 OK response, page title, and roundtrip latency, confirming that the VM is online and the entire multi-tier proxy pipeline is functional.
-10. **Pristine Snapshot Creation**:
+8. **Pristine Snapshot Creation**:
    * Polls SSH connectivity until the VM is online and cloud-init has finished.
    * Creates a pristine baseline disk snapshot (`snapshot-base-clean`) for instant disaster rollback.
-11. **Automated Inventory Synchronization**:
+9. **Automated Inventory Synchronization**:
    * Automatically registers the newly provisioned VM in `inventory/{vmhost}/{vm}/vm.yaml` via `devbox_inventory`.
    * Refreshes the hypervisor host record in `inventory/{vmhost}/vmhost.yaml`.
    * On `--purge`, cleans up the VM directory in `inventory/{vmhost}/{vm}/` and refreshes host records.
+10. **Proxy Connectivity Validation (`--validate-proxy`)**:
+   * Requests `http://<hypervisor>:<proxy_port>/` once the guest application workload is started.
+   * Confirms end-to-end communication through the multi-tier proxy pipeline.
 
 ---
 

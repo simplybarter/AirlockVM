@@ -618,216 +618,8 @@ def create_baseline_snapshot(params: dict, host: str, dry_run: bool = False) -> 
 
 
 # ==============================================================================
-# Persistent Landing Page & End-to-End Proxy Validation
+# End-to-End Proxy Validation
 # ==============================================================================
-
-def setup_vm_landing_service(params: dict, dry_run: bool = False) -> None:
-    """Provisions a lightweight default landing page and health service inside the VM.
-
-    This ensures that http://<host>:<ext_port>/ and /health.txt are immediately
-    browsable in any web browser upon deployment until a user application workload starts.
-    """
-    vm_name = params["VM_NAME"]
-    host = params["HYPERVISOR_HOST"]
-    ext_port = params.get("PROXY_EXTERNAL_PORT", "3001")
-    int_port = params.get("APP_INTERNAL_PORT", "3000")
-    primary_user = params.get("VM_PRIMARY_USER", "devbox")
-
-    print(f"[*] Provisioning DevBox landing page service inside '{vm_name}' (port {int_port})...")
-    if dry_run:
-        print(f"    [PLAN] Create /var/www/devbox-landing with index.html")
-        print(f"    [PLAN] Install & start /etc/systemd/system/devbox-landing.service")
-        return
-
-    setup_script = f"""
-set -euo pipefail
-sudo mkdir -p /var/www/devbox-landing
-sudo chown {primary_user}:{primary_user} /var/www/devbox-landing
-
-cat << 'EOF' | sudo tee /var/www/devbox-landing/index.html > /dev/null
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DevBox VM — Online</title>
-  <style>
-    :root {{
-      --bg: #0f172a;
-      --card-bg: #1e293b;
-      --border: #334155;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --accent: #38bdf8;
-      --green: #22c55e;
-    }}
-    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    body {{
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      padding: 1.5rem;
-    }}
-    .card {{
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 1rem;
-      max-width: 680px;
-      width: 100%;
-      padding: 2rem;
-      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
-    }}
-    .header {{
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 1.25rem;
-      margin-bottom: 1.5rem;
-    }}
-    .badge {{
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      background: rgba(34, 197, 94, 0.15);
-      color: var(--green);
-      border: 1px solid rgba(34, 197, 94, 0.3);
-      padding: 0.35rem 0.75rem;
-      border-radius: 9999px;
-      font-size: 0.875rem;
-      font-weight: 600;
-    }}
-    .dot {{
-      width: 8px;
-      height: 8px;
-      background: var(--green);
-      border-radius: 50%;
-      box-shadow: 0 0 8px var(--green);
-      animation: pulse 2s infinite;
-    }}
-    @keyframes pulse {{
-      0%, 100% {{ opacity: 1; transform: scale(1); }}
-      50% {{ opacity: 0.4; transform: scale(0.85); }}
-    }}
-    h1 {{ font-size: 1.5rem; font-weight: 700; color: #fff; }}
-    .subtitle {{ color: var(--text-muted); font-size: 0.925rem; margin-top: 0.25rem; }}
-    .grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-    }}
-    .metric {{
-      background: rgba(15, 23, 42, 0.6);
-      border: 1px solid var(--border);
-      border-radius: 0.5rem;
-      padding: 1rem;
-    }}
-    .metric-label {{
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-      margin-bottom: 0.25rem;
-    }}
-    .metric-value {{
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 1rem;
-      font-weight: 600;
-      color: var(--accent);
-    }}
-    .actions {{
-      border-top: 1px solid var(--border);
-      padding-top: 1.25rem;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      align-items: center;
-      justify-content: space-between;
-    }}
-    .notice {{
-      color: var(--text-muted);
-      font-size: 0.825rem;
-      line-height: 1.4;
-      margin-top: 1rem;
-      padding: 0.75rem 1rem;
-      background: rgba(56, 189, 248, 0.05);
-      border-left: 3px solid var(--accent);
-      border-radius: 0.25rem;
-    }}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="header">
-      <div>
-        <h1>DevBox Environment</h1>
-        <p class="subtitle">Dedicated Execution Virtual Machine</p>
-      </div>
-      <div class="badge">
-        <span class="dot"></span> ONLINE
-      </div>
-    </div>
-    <div class="grid">
-      <div class="metric">
-        <div class="metric-label">Virtual Machine</div>
-        <div class="metric-value">{vm_name} (Ubuntu 24.04)</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Hypervisor Forwarder</div>
-        <div class="metric-value">http://{host}:{ext_port}/</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Guest Internal Address</div>
-        <div class="metric-value">{params['VM_IP']}:{int_port}</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">SSH Access Target</div>
-        <div class="metric-value">ssh {vm_name}</div>
-      </div>
-    </div>
-    <div class="notice">
-      <strong>Workload Ready:</strong> This status page is served by <code>devbox-landing.service</code>. When you launch your application workload on port {int_port} (via <code>./deploy_app_to_vm.sh</code> or Docker), it will serve your application directly.
-    </div>
-    <div class="actions">
-      <span style="font-size: 0.8rem; color: var(--accent);">DevBox Core Services: Docker &bull; Python &bull; QEMU Guest Agent</span>
-      <span style="font-size: 0.8rem; color: var(--text-muted);">systemd-socket-proxyd connected</span>
-    </div>
-  </div>
-</body>
-</html>
-EOF
-
-cat << 'EOF' | sudo tee /etc/systemd/system/devbox-landing.service > /dev/null
-[Unit]
-Description=DevBox Landing Page Service
-After=network.target
-
-[Service]
-Type=simple
-User={primary_user}
-WorkingDirectory=/var/www/devbox-landing
-ExecStart=/usr/bin/python3 -m http.server {int_port} --directory /var/www/devbox-landing
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now devbox-landing.service
-"""
-    ret, _, err = run_cmd_status(["bash", "-c", setup_script], host=vm_name)
-    if ret != 0:
-        print(f"    [-] Warning: Could not install landing service: {err}")
-    else:
-        print(f"    [✓] Persistent landing service active on {vm_name}:{int_port} (devbox-landing.service)")
-
 
 def validate_proxy_connection(params: dict, dry_run: bool = False) -> tuple[bool, str]:
     """Validates end-to-end communication by requesting the root URL via the hypervisor proxy.
@@ -1283,28 +1075,18 @@ def main():
             run_cmd_status(["cloud-init", "status", "--wait"], host=vm_name)
             print("    [✓] Cloud-init completed successfully.")
 
-            # Step 8: Setup Persistent Landing Page & Health Service in VM
-            setup_vm_landing_service(params, dry_run=False)
-
-            # Step 9: End-to-End Proxy Validation (Accesses textfile via proxy)
-            validate_proxy_connection(params, dry_run=False)
-
-            # Step 10: Create Baseline Pristine Snapshot
+            # Step 8: Create Baseline Pristine Snapshot
             create_baseline_snapshot(params, host, dry_run=False)
 
-            # Step 11: Auto-sync inventory
+            # Step 9: Auto-sync inventory
             sync_inventory_record(params, action="update", dry_run=False)
     else:
         # Dry-run plan for post-boot steps
         print(f"\n[*] Waiting for VM '{vm_name}' to boot and respond to SSH...")
         print(f"    [PLAN] Probe 'ssh {vm_name}' until online")
-        # Step 8: Persistent Landing Service (dry-run plan)
-        setup_vm_landing_service(params, dry_run=True)
-        # Step 9: End-to-End Proxy Validation (dry-run plan)
-        validate_proxy_connection(params, dry_run=True)
-        # Step 10: Pristine baseline snapshot (dry-run plan)
+        # Step 8: Pristine baseline snapshot (dry-run plan)
         create_baseline_snapshot(params, host, dry_run=True)
-        # Step 11: Auto-sync inventory (dry-run plan)
+        # Step 9: Auto-sync inventory (dry-run plan)
         sync_inventory_record(params, action="update", dry_run=True)
 
     if args.dry_run:
