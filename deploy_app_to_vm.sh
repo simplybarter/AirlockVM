@@ -45,6 +45,8 @@ show_usage() {
   echo "  --delete               Delete extraneous remote files not present locally"
   echo "  --verbose, -v          Increase rsync output verbosity"
   echo "  --offline              Scan and display local sync candidate files (no network calls)"
+  echo "  --no-restart           Skip executing post-deploy commands on the VM"
+  echo "  --sync-only            Alias for --no-restart"
   echo ""
   list_vms
   exit 0

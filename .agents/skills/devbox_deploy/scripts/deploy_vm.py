@@ -128,6 +128,7 @@ def load_vm_config(config_path: Path) -> dict[str, str]:
         "SNAPSHOT_BASE_NAME": str(bp.get("snapshot_base_name", "snapshot-base-clean")),
         "SNAPSHOT_BASE_DESC": str(bp.get("snapshot_base_desc", "Pristine base setup with Docker and Python")),
         "REMOTE_CODE_DIR": str(bp.get("remote_code_dir", "~/DevBox/")),
+        "REPOSITORIES": bp.get("repositories", []),
     }
     return params
 
@@ -533,18 +534,41 @@ def provision_domain(params: dict, disk_path: str, seed_iso_path: str, host: str
 
 
 def setup_hypervisor_proxy(params: dict, host: str, dry_run: bool = False) -> None:
-    """Sets up systemd-socket-proxyd on the hypervisor to forward external traffic to VM."""
-    socket_path = params.get("PROXY_SOCKET_SERVICE", "/etc/systemd/system/devbox-proxy.socket")
-    service_path = socket_path.replace(".socket", ".service")
-    ext_port = params.get("PROXY_EXTERNAL_PORT", "3001")
+    """Sets up systemd-socket-proxyd forwarders on the hypervisor for all mapped application ports."""
+    vm_name = params["VM_NAME"]
     vm_ip = params["VM_IP"]
-    int_port = params.get("APP_INTERNAL_PORT", "3000")
+    repos = params.get("REPOSITORIES", [])
 
-    print(f"[*] Configuring systemd socket forwarder on {host} (port {ext_port} -> {vm_ip}:{int_port})...")
+    # Collect port mappings: list of (ext_port, int_port, label)
+    port_mappings = []
+    seen_ext = set()
 
-    socket_content = f"""[Unit]
-Description=DevBox Application Proxy Socket
-PartOf=devbox-proxy.service
+    if isinstance(repos, list) and repos:
+        for r in repos:
+            if not isinstance(r, dict):
+                continue
+            rname = r.get("name", vm_name)
+            ext_p = str(r.get("external_port", "") or params.get("PROXY_EXTERNAL_PORT", "3001"))
+            int_p = str(r.get("internal_port", "") or params.get("APP_INTERNAL_PORT", "3000"))
+            if ext_p not in seen_ext:
+                seen_ext.add(ext_p)
+                port_mappings.append((ext_p, int_p, rname))
+
+    if not port_mappings:
+        default_ext = str(params.get("PROXY_EXTERNAL_PORT", "3001"))
+        default_int = str(params.get("APP_INTERNAL_PORT", "3000"))
+        port_mappings.append((default_ext, default_int, vm_name))
+
+    for ext_port, int_port, label in port_mappings:
+        unit_name = f"{vm_name}-p{ext_port}-proxy"
+        socket_path = f"/etc/systemd/system/{unit_name}.socket"
+        service_path = f"/etc/systemd/system/{unit_name}.service"
+
+        print(f"[*] Configuring hypervisor proxy for '{label}' on {host} (port {ext_port} -> {vm_ip}:{int_port})...")
+
+        socket_content = f"""[Unit]
+Description=DevBox Proxy Socket for {label} ({vm_name})
+PartOf={unit_name}.service
 
 [Socket]
 ListenStream=0.0.0.0:{ext_port}
@@ -553,21 +577,21 @@ ListenStream=0.0.0.0:{ext_port}
 WantedBy=sockets.target
 """
 
-    service_content = f"""[Unit]
-Description=DevBox Application Proxy Service
+        service_content = f"""[Unit]
+Description=DevBox Proxy Service for {label} ({vm_name})
 After=network.target
 
 [Service]
 ExecStart=/lib/systemd/systemd-socket-proxyd {vm_ip}:{int_port}
 """
 
-    if dry_run:
-        print(f"    [PLAN] Configure {socket_path}")
-        print(f"    [PLAN] Configure {service_path}")
-        print(f"    [PLAN] sudo systemctl daemon-reload && sudo systemctl enable --now devbox-proxy.socket")
-        return
+        if dry_run:
+            print(f"    [PLAN] Configure {socket_path}")
+            print(f"    [PLAN] Configure {service_path}")
+            print(f"    [PLAN] sudo systemctl daemon-reload && sudo systemctl enable --now {unit_name}.socket")
+            continue
 
-    setup_script = f"""
+        setup_script = f"""
 set -euo pipefail
 sudo tee '{socket_path}' >/dev/null << 'EOF'
 {socket_content}
@@ -578,13 +602,13 @@ sudo tee '{service_path}' >/dev/null << 'EOF'
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now devbox-proxy.socket
+sudo systemctl enable --now '{unit_name}.socket'
 """
-    ret, _, err = run_cmd_status(["bash", "-c", setup_script], host=host)
-    if ret != 0:
-        print(f"    [-] Warning: Could not configure socket proxy: {err}")
-    else:
-        print(f"    [✓] systemd-socket-proxyd enabled and listening on port {ext_port}")
+        ret, _, err = run_cmd_status(["bash", "-c", setup_script], host=host)
+        if ret != 0:
+            print(f"    [-] Warning: Could not configure socket proxy ({unit_name}): {err}")
+        else:
+            print(f"    [✓] systemd-socket-proxyd active on {host}:{ext_port} -> {vm_ip}:{int_port}")
 
 
 def create_baseline_snapshot(params: dict, host: str, dry_run: bool = False) -> None:
@@ -870,6 +894,15 @@ def execute_purge(params: dict, host: str, dry_run: bool = False) -> None:
         print(f"    [✓] Workstation known_hosts cleaned.")
     else:
         print(f"    [PLAN] ssh-keygen -R {vm_name} && ssh-keygen -R {params['VM_IP']}")
+
+    # Clean up hypervisor proxy forwarders for this VM
+    print(f"    -> Cleaning up hypervisor proxy forwarders for '{vm_name}'...")
+    if not dry_run:
+        cleanup_proxy_cmd = f"sudo systemctl stop '{vm_name}'-p*-proxy.socket '{vm_name}'-p*-proxy.service '{vm_name}'-proxy.socket devbox-proxy.socket 2>/dev/null || true; sudo systemctl disable '{vm_name}'-p*-proxy.socket '{vm_name}'-proxy.socket devbox-proxy.socket 2>/dev/null || true; sudo rm -f /etc/systemd/system/'{vm_name}'-p*-proxy.* /etc/systemd/system/'{vm_name}'-proxy.* 2>/dev/null || true; sudo systemctl daemon-reload 2>/dev/null || true"
+        run_cmd_status(["bash", "-c", cleanup_proxy_cmd], host=host)
+        print(f"    [✓] Hypervisor proxy sockets cleaned.")
+    else:
+        print(f"    [PLAN] sudo systemctl stop {vm_name}-p*-proxy.socket && rm -f /etc/systemd/system/{vm_name}-p*-proxy.*")
 
     # Clean up inventory record
     sync_inventory_record(params, action="purge", dry_run=dry_run)

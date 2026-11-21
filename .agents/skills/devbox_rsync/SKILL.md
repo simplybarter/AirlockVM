@@ -72,14 +72,31 @@ When `inventory/` is present, `./deploy_app_to_vm.sh` acts as a multi-VM dispatc
 ./deploy_app_to_vm.sh appsurfer-vm
 ./deploy_app_to_vm.sh rugbyasssistant-vm
 
-# Pass rsync options (e.g., --offline, --dry-run, --delete):
+# Pass rsync options (e.g., --offline, --dry-run, --delete, --no-restart):
 ./deploy_app_to_vm.sh --offline
 ./deploy_app_to_vm.sh appsurfer-vm --dry-run
 ./deploy_app_to_vm.sh devbox-vm --delete
+./deploy_app_to_vm.sh --no-restart     # Sync files only without running post-deploy commands
 
 # Deploy application to all inventory VMs sequentially:
 ./deploy_app_to_vm.sh --all
 ```
+
+### 3. Dynamic Post-Deploy Hooks (`post_deploy`)
+
+In `inventory/<vmhost>/<vm>/vm.yaml`, each repository entry can declare an optional `post_deploy:` command:
+
+```yaml
+repositories:
+  - name: AppSurfer
+    local_path: /path/to/AppSurfer
+    remote_path: ~/AppSurfer/
+    post_deploy: "pip install -e . && python3 -m appsurfer.server" # or "docker compose up -d"
+```
+
+* When `post_deploy` is configured, `deploy_app_to_vm.sh` automatically executes the command inside the repository's remote path on the VM after rsync finishes.
+* Use `--dry-run` to preview the planned post-deploy command without running it.
+* Use `--no-restart` or `--sync-only` to sync code without triggering the post-deploy command.
 
 You can also run any VM's deployment script directly:
 ```bash

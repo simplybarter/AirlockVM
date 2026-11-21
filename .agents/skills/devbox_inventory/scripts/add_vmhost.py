@@ -684,6 +684,38 @@ def render_vmhost_yaml(host_data: dict, vm_records: list[dict], template_path: P
     return rendered
 
 
+def render_repositories_yaml(vm_data: dict, bp: dict) -> str:
+    """Renders the repositories YAML block for vm.yaml."""
+    repos = bp.get("repositories", [])
+    default_int = bp.get("app_internal_port", 3000)
+    default_ext = bp.get("proxy_external_port", 3001)
+    if not repos:
+        proj_name = bp.get("project_name", vm_data.get("name", "DevBox"))
+        remote_dest = bp.get("remote_code_dir", f"~/{proj_name}/")
+        repos = [{
+            "name": proj_name,
+            "local_path": f"/home/mother/projects/priv/2026/{proj_name}",
+            "remote_path": remote_dest,
+            "internal_port": default_int,
+            "external_port": default_ext,
+            "post_deploy": "",
+        }]
+
+    lines = []
+    for r in repos:
+        lines.append(f"        - name: \"{r.get('name', '')}\"")
+        lines.append(f"          local_path: \"{r.get('local_path', '')}\"")
+        lines.append(f"          remote_path: \"{r.get('remote_path', '')}\"")
+        lines.append(f"          internal_port: {r.get('internal_port', default_int)}")
+        lines.append(f"          external_port: {r.get('external_port', default_ext)}")
+        post_deploy = r.get("post_deploy", "")
+        if post_deploy:
+            lines.append(f"          post_deploy: \"{post_deploy}\"")
+        else:
+            lines.append(f"          post_deploy: \"\"")
+    return "\n".join(lines)
+
+
 def render_vm_yaml(vm_data: dict, template_path: Path) -> str:
     """Renders the vm.yaml document from the template."""
     template_content = template_path.read_text(encoding="utf-8")
