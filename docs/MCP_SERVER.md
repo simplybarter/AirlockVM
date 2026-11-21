@@ -123,14 +123,22 @@ Or using direct Python execution:
 
 ### 4.2. Automated Client Onboarding (`connect_devbox.sh`)
 
-DevBox provides a helper script (`connect_devbox.sh`) to automatically register the DevBox MCP Server into a target workspace or user profile without manual JSON editing:
+DevBox provides a helper script (`connect_devbox.sh`) to automatically register or remove the DevBox MCP Server across all major IDEs and AI agent harnesses without manual JSON editing:
+
+* **Supported Platforms**: VS Code (`.vscode/mcp.json`), Antigravity / Gemini (`.gemini/mcp_config.json`), Cursor (`.cursor/mcp.json`), Claude (`.mcp.json` / `claude_desktop_config.json`), Windsurf (`.codeium/windsurf/mcp_config.json`), JetBrains (`.idea/mcp.json`), and universal root `.mcp.json`.
 
 ```bash
-# Connect a specific project
-./connect_devbox.sh --target /path/to/AppSurfer
+# Connect all detected IDEs in a project workspace:
+./connect_devbox.sh --target /path/to/AppSurfer --all
 
-# Connect globally for the current user
-./connect_devbox.sh --global
+# Connect specific IDEs (e.g. VS Code & Antigravity):
+./connect_devbox.sh --target /path/to/AppSurfer --vscode --antigravity
+
+# Connect globally for the current user across all installed IDEs:
+./connect_devbox.sh --global --all
+
+# Inspect active DevBox registrations:
+./connect_devbox.sh --list
 ```
 
 ---
