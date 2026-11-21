@@ -16,7 +16,6 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
-DEFAULTS_PATH = SKILL_DIR / "template" / "defaults.json"
 
 
 def find_repo_root() -> Path:

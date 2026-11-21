@@ -40,8 +40,7 @@ inventory/
 ├── SKILL.md                          # Skill documentation & reference guide
 ├── template/
 │   ├── vmhost.yaml.template          # Defined YAML template for the hypervisor host
-│   ├── vm.yaml.template              # Defined YAML template for individual virtual machines
-│   └── defaults.json                 # Parameter schema & validation defaults
+│   └── vm.yaml.template              # Defined YAML template for individual virtual machines
 └── scripts/
     ├── add_vmhost.py                 # Core discovery & inventory generation tool
     ├── inventory_manager.py          # Inventory listing, inspection, & reporting CLI

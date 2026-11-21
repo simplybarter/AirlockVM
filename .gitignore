@@ -1,5 +1,4 @@
 # Generated local sync scripts & inventory
-sync_to_devbox.sh
 analysis/
 inventory/
 

@@ -1,7 +1,7 @@
 ---
 name: devbox_rsync
 description: >-
-  Evaluates project source code and dependencies to generate an optimized 'sync_to_devbox.sh'
+  Evaluates project source code and dependencies to generate an optimized 'deploy_app_to_vm.sh'
   script in the project root. The generated script synchronizes ONLY the application files
   necessary to run and test workloads inside the dedicated DevBox virtual machine, excluding
   version control, documentation, agent configs, and local build artifacts.
@@ -9,7 +9,7 @@ description: >-
 
 # DevBox Rsync Generator Skill (`devbox_rsync`)
 
-This skill evaluates your project directory to determine the exact tech stack (Python, Node.js, Go, Rust, Docker, static assets) and generates an optimized, executable [`sync_to_devbox.sh`](../../../sync_to_devbox.sh) in the project root.
+This skill evaluates your project directory to determine the exact tech stack (Python, Node.js, Go, Rust, Docker, static assets) and generates an optimized, executable [`deploy_app_to_vm.sh`](../../../deploy_app_to_vm.sh) in the project root.
 
 The generated script ensures that **ONLY code needed to run the application on the VM is synchronized**, while excluding heavy local caches, local dependencies, virtual environments, documentation, and agent configurations.
 
@@ -33,15 +33,15 @@ The generated script ensures that **ONLY code needed to run the application on t
 2. **Intelligent Stack Evaluation**:
    * Analyzes project manifests (`requirements.txt`, `package.json`, `Cargo.toml`, `go.mod`, `Dockerfile`).
    * Determines files that must **never** be copied to the VM (such as `.git/`, `.agents/`, local `node_modules/`, `venv/`, `.env*.local`, and documentation).
-3. **Generates `sync_to_devbox.sh`**:
+3. **Generates `deploy_app_to_vm.sh`**:
    * Writes a ready-to-run, executable shell script in the project root.
-   * Ensures that `sync_to_devbox.sh` is ignored in `.gitignore`.
+   * Dispatches deployments to dedicated VM scripts in `inventory/<vmhost>/<vm>/deploy_app_to_vm.sh`.
 
 ---
 
 ## Usage
 
-### 1. Generate or Update `sync_to_devbox.sh`
+### 1. Generate or Update `deploy_app_to_vm.sh`
 
 Run the generator from your repository:
 
@@ -57,25 +57,33 @@ python3 .agents/skills/devbox_rsync/scripts/generate_sync.py \
   --remote-dir ~/my-app/
 ```
 
-### 2. Using `sync_to_devbox.sh`
+### 2. Using `deploy_app_to_vm.sh` (Multi-VM Dispatcher & Deployment)
 
-Once generated in your project root, synchronize code to your VM at any time:
+When `inventory/` is present, `./deploy_app_to_vm.sh` acts as a multi-VM dispatcher that forwards commands to each VM's dedicated deployment script (`inventory/<vmhost>/<vm>/deploy_app_to_vm.sh`).
 
 ```bash
-# Offline candidate inventory (0 network connections made):
-./sync_to_devbox.sh --offline
+# List all discovered inventory VMs and their deployment scripts:
+./deploy_app_to_vm.sh --list
 
-# Preview local inventory & test remote differential without modifying anything:
-./sync_to_devbox.sh --dry-run
+# Deploy to default VM (e.g. devbox-vm):
+./deploy_app_to_vm.sh
 
-# Perform synchronization:
-./sync_to_devbox.sh
+# Deploy to a specific VM:
+./deploy_app_to_vm.sh appsurfer-vm
+./deploy_app_to_vm.sh rugbyasssistant-vm
 
-# Sync and delete files on the VM that were deleted locally:
-./sync_to_devbox.sh --delete
+# Pass rsync options (e.g., --offline, --dry-run, --delete):
+./deploy_app_to_vm.sh --offline
+./deploy_app_to_vm.sh appsurfer-vm --dry-run
+./deploy_app_to_vm.sh devbox-vm --delete
 
-# Verbose progress output:
-./sync_to_devbox.sh --verbose
+# Deploy application to all inventory VMs sequentially:
+./deploy_app_to_vm.sh --all
+```
+
+You can also run any VM's deployment script directly:
+```bash
+./inventory/barkley/appsurfer-vm/deploy_app_to_vm.sh --offline
 ```
 
 ### Dry-Run Itemized Change Legend

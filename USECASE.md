@@ -40,11 +40,11 @@ You author code on your workstation, but **zero application code runs directly o
 ### 1. Code Authoring on Host
 Work inside your favorite IDE on your workstation as usual. You have full access to your desktop tools, extensions, and git workflows.
 
-### 2. Fast Code Synchronization
-Sync your code into the local VM in milliseconds using the generated sync script:
+### 2. Fast Application Code Deployment
+Deploy your application code into the local VM in milliseconds using the generated deployment script:
 ```bash
 # Push application changes to the dedicated VM (skips caches, venvs, and docs)
-./sync_to_devbox.sh
+./deploy_app_to_vm.sh
 ```
 *(Generated automatically by the `devbox_rsync` skill; alternatively, attach via VS Code Remote-SSH to edit directly inside the VM).*
 

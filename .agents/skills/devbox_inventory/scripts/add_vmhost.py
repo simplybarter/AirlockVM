@@ -745,6 +745,7 @@ def render_vm_yaml(vm_data: dict, template_path: Path) -> str:
         "BLUEPRINT_UEFI_FIRMWARE": bp.get("uefi_firmware", "OVMF_CODE_4M.ms.fd"),
         "BLUEPRINT_SNAPSHOT_BASE_NAME": bp.get("snapshot_base_name", "snapshot-base-clean"),
         "BLUEPRINT_SNAPSHOT_BASE_DESC": bp.get("snapshot_base_desc", "Pristine base setup with Docker and Python"),
+        "BLUEPRINT_REPOSITORIES_YAML": render_repositories_yaml(vm_data, bp),
     })
 
     rendered = template_content

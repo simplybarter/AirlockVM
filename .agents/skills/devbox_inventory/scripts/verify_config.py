@@ -20,7 +20,6 @@ SKILL_DIR = SCRIPT_DIR.parent
 TEMPLATES_DIR = SKILL_DIR / "template"
 VMHOST_TEMPLATE = TEMPLATES_DIR / "vmhost.yaml.template"
 VM_TEMPLATE = TEMPLATES_DIR / "vm.yaml.template"
-DEFAULTS_PATH = TEMPLATES_DIR / "defaults.json"
 
 
 def find_repo_root() -> Path:
@@ -44,17 +43,6 @@ def check_template_syntax(template_path: Path) -> list[str]:
     unique_placeholders = sorted(set(placeholders))
     print(f"    [✓] Found {len(unique_placeholders)} unique placeholder variables.")
     return unique_placeholders
-
-
-def check_defaults_coverage(placeholders: list[str], defaults_path: Path) -> bool:
-    print(f"[*] Checking defaults coverage: {defaults_path.name}")
-    defaults = json.loads(defaults_path.read_text(encoding="utf-8"))
-    missing = [p for p in placeholders if p not in defaults]
-    if missing:
-        print(f"    [-] WARNING: Template variables missing from defaults.json: {missing}")
-        return False
-    print("    [✓] All template placeholders are defined in defaults.json.")
-    return True
 
 
 def check_inventory_yaml_files(inventory_root: Path) -> bool:
@@ -97,10 +85,9 @@ def main():
 
     host_placeholders = check_template_syntax(VMHOST_TEMPLATE)
     vm_placeholders = check_template_syntax(VM_TEMPLATE)
-    defaults_ok = check_defaults_coverage(host_placeholders, DEFAULTS_PATH)
     inv_ok = check_inventory_yaml_files(args.inventory)
 
-    if defaults_ok and inv_ok:
+    if host_placeholders and vm_placeholders and inv_ok:
         print("\n[✓] DevBox Inventory verification passed successfully!")
         sys.exit(0)
     else:

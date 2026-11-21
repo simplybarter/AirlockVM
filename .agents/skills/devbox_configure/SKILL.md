@@ -105,9 +105,9 @@ To persist and version-control custom user profiles:
 
 ## Parameter Reference
 
-DevBox partitions configuration parameters cleanly between **Project & Guest Blueprint Defaults** (defined in [`template/defaults.json`](./template/defaults.json)) and **Infrastructure & Hypervisor State** (provided dynamically by [`devbox_inventory`](../devbox_inventory/SKILL.md)):
+DevBox partitions configuration parameters cleanly between **Guest Blueprint Specifications** (defined in `inventory/{vmhost}/{vm}/vm.yaml`) and **Infrastructure & Hypervisor State** (provided dynamically by [`devbox_inventory`](../devbox_inventory/SKILL.md)):
 
-### 1. Project & Guest Blueprint Defaults (`defaults.json`)
+### 1. Guest Blueprint Specifications (`vm.yaml`)
 Parameters specific to the development workstation, application stack, and provisioning recipe:
 
 | Parameter Name | Description | Example Value |

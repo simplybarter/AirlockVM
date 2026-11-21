@@ -40,6 +40,8 @@ vm:
     uefi_firmware: "{{ BLUEPRINT_UEFI_FIRMWARE }}"
     snapshot_base_name: "{{ BLUEPRINT_SNAPSHOT_BASE_NAME }}"
     snapshot_base_desc: "{{ BLUEPRINT_SNAPSHOT_BASE_DESC }}"
+    repositories:
+{{ BLUEPRINT_REPOSITORIES_YAML }}
   metadata:
     directory: "inventory/{{ VMHOST_NAME }}/{{ VM_NAME }}/"
     record_path: "inventory/{{ VMHOST_NAME }}/{{ VM_NAME }}/vm.yaml"

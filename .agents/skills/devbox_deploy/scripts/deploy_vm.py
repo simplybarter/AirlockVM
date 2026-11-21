@@ -791,7 +791,7 @@ cat << 'EOF' | sudo tee /var/www/devbox-landing/index.html > /dev/null
       </div>
     </div>
     <div class="notice">
-      <strong>Workload Ready:</strong> This status page is served by <code>devbox-landing.service</code>. When you launch your application workload on port {int_port} (via <code>./sync_to_devbox.sh</code> or Docker), it will serve your application directly.
+      <strong>Workload Ready:</strong> This status page is served by <code>devbox-landing.service</code>. When you launch your application workload on port {int_port} (via <code>./deploy_app_to_vm.sh</code> or Docker), it will serve your application directly.
     </div>
     <div class="actions">
       <span style="font-size: 0.8rem; color: var(--accent);">DevBox Core Services: Docker &bull; Python &bull; QEMU Guest Agent</span>
@@ -1318,7 +1318,7 @@ def main():
         print("============================================================")
         print("Next steps:")
         print(f"  1. Connect interactively:   ssh {vm_name}")
-        print(f"  2. Synchronize application: ./sync_to_devbox.sh")
+        print(f"  2. Synchronize application: ./deploy_app_to_vm.sh")
         print(f"  3. Access web application:  http://{host}:{params['PROXY_EXTERNAL_PORT']}/")
         print("============================================================\n")
 
