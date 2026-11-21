@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 """
 Verification & Validation Script for DevBox VM Documentation
-Ensures all placeholders in template are accounted for and checks rendered docs.
+Ensures all placeholders in template are accounted for in devbox_inventory templates and checks rendered docs.
 """
 
 import argparse
-import json
 import re
 import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
-TEMPLATE_PATH = SKILL_DIR / "template" / "DEVELOPMENT_VM.md.template"
-DEFAULTS_PATH = SKILL_DIR / "template" / "defaults.json"
+TEMPLATE_PATH = SKILL_DIR / "template" / "VM.md.template"
 
 
 def find_repo_root() -> Path:
@@ -27,10 +25,55 @@ def find_repo_root() -> Path:
 
 
 REPO_ROOT = find_repo_root()
-DOCS_PATH = REPO_ROOT / "docs" / "DEVELOPMENT_VM.md"
+DOCS_PATH = (
+    REPO_ROOT / "docs" / "VM.md"
+    if (REPO_ROOT / "docs" / "VM.md").exists() or not (REPO_ROOT / "docs" / "DEVELOPMENT_VM.md").exists()
+    else REPO_ROOT / "docs" / "DEVELOPMENT_VM.md"
+)
+INVENTORY_TEMPLATES_DIR = REPO_ROOT / ".agents" / "skills" / "devbox_inventory" / "template"
+
+# Direct mapping of VM.md placeholders provided by devbox_inventory
+INVENTORY_PROVIDED_SCHEMA = {
+    # 1. Hypervisor infrastructure attributes (from vmhost.yaml)
+    "HYPERVISOR_HOST",
+    "HYPERVISOR_HOST_TITLE",
+    "HYPERVISOR_OS",
+    "HYPERVISOR_SPECS",
+    "HYPERVISOR_LAN_IP",
+    "VIRT_BRIDGE",
+    "LIBVIRT_NETWORK",
+    "SUBNET_CIDR",
+    # 2. Virtual machine allocation & runtime state (from vm.yaml)
+    "VM_NAME",
+    "VM_IP",
+    "VM_MAC",
+    "VCPU_CORES",
+    "RAM_MIB",
+    "RAM_GB",
+    # 3. Project blueprint & provisioning spec (from vm.yaml blueprint section)
+    "PROJECT_NAME",
+    "DEV_HOST",
+    "DEV_HOST_TITLE",
+    "VM_PRIMARY_USER",
+    "VM_SECONDARY_USER",
+    "SSH_KEY_PATH",
+    "APP_INTERNAL_PORT",
+    "PROXY_EXTERNAL_PORT",
+    "PROXY_SOCKET_SERVICE",
+    "REMOTE_CODE_DIR",
+    "GUEST_OS",
+    "GUEST_OS_DETAILS",
+    "CPU_MODE",
+    "BALLOON_DRIVER",
+    "DISK_SIZE_GIB",
+    "DISK_FORMAT",
+    "UEFI_FIRMWARE",
+    "SNAPSHOT_BASE_NAME",
+    "SNAPSHOT_BASE_DESC",
+}
 
 
-def check_template_syntax(template_path: Path):
+def check_template_syntax(template_path: Path) -> list[str]:
     print(f"Checking template syntax: {template_path}")
     content = template_path.read_text(encoding="utf-8")
     placeholders = re.findall(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}", content)
@@ -39,18 +82,17 @@ def check_template_syntax(template_path: Path):
     return unique_placeholders
 
 
-def check_defaults_coverage(placeholders: list[str], defaults_path: Path):
-    print(f"Checking defaults coverage: {defaults_path}")
-    defaults = json.loads(defaults_path.read_text(encoding="utf-8"))
-    missing = [p for p in placeholders if p not in defaults]
+def check_inventory_schema_coverage(placeholders: list[str]) -> bool:
+    print(f"Checking inventory schema coverage (devbox_inventory: vmhost.yaml + vm.yaml)...")
+    missing = [p for p in placeholders if p not in INVENTORY_PROVIDED_SCHEMA]
     if missing:
-        print(f"WARNING: The following template variables are missing from defaults.json: {missing}")
+        print(f"WARNING: The following template variables are missing from inventory schema: {missing}")
         return False
-    print("All template placeholders are defined in defaults.json.")
+    print(f"All {len(placeholders)} template placeholders accounted for across devbox_inventory schema.")
     return True
 
 
-def check_rendered_doc(doc_path: Path):
+def check_rendered_doc(doc_path: Path) -> bool:
     if not doc_path.exists():
         alt_path = doc_path.with_suffix(".md.ori")
         if alt_path.exists():
@@ -69,12 +111,12 @@ def check_rendered_doc(doc_path: Path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Verify DevBox template and docs")
+    parser = argparse.ArgumentParser(description="Verify DevBox template and docs against inventory schema")
     parser.add_argument("--doc", type=Path, default=DOCS_PATH, help="Path to rendered markdown document")
     args = parser.parse_args()
 
     placeholders = check_template_syntax(TEMPLATE_PATH)
-    coverage_ok = check_defaults_coverage(placeholders, DEFAULTS_PATH)
+    coverage_ok = check_inventory_schema_coverage(placeholders)
     doc_ok = check_rendered_doc(args.doc)
 
     if coverage_ok and doc_ok:

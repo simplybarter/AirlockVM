@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 DevBox Virtual Machine Deployment Engine (deploy_vm.py)
-Deploys, provisions, and manages the dedicated execution VM defined in docs/DEVELOPMENT_VM.md.
+Deploys, provisions, and manages the dedicated execution VM defined in docs/VM.md.
 
 Enforces two strict pre-flight gates:
-  1. docs/DEVELOPMENT_VM.md MUST exist.
+  1. docs/VM.md MUST exist.
   2. .agents/skills/devbox_configure/scripts/verify_config.py MUST exit cleanly (code 0).
 """
 
@@ -37,7 +37,11 @@ def find_repo_root() -> Path:
 
 
 REPO_ROOT = find_repo_root()
-DOCS_PATH = REPO_ROOT / "docs" / "DEVELOPMENT_VM.md"
+DOCS_PATH = (
+    REPO_ROOT / "docs" / "VM.md"
+    if (REPO_ROOT / "docs" / "VM.md").exists() or not (REPO_ROOT / "docs" / "DEVELOPMENT_VM.md").exists()
+    else REPO_ROOT / "docs" / "DEVELOPMENT_VM.md"
+)
 VERIFY_SCRIPT = REPO_ROOT / ".agents" / "skills" / "devbox_configure" / "scripts" / "verify_config.py"
 
 
@@ -69,7 +73,7 @@ def run_cmd_status(cmd: list[str], host: str | None = None) -> tuple[int, str, s
 def check_prerequisites(doc_path: Path = DOCS_PATH, verify_script: Path = VERIFY_SCRIPT) -> tuple[bool, str]:
     """Enforces the mandatory prerequisite gates before any deployment action.
 
-    Gate 1: docs/DEVELOPMENT_VM.md must exist.
+    Gate 1: docs/VM.md must exist.
     Gate 2: verify_config.py must exit with code 0.
     """
     # Gate 1: Check document existence
@@ -103,7 +107,7 @@ def check_prerequisites(doc_path: Path = DOCS_PATH, verify_script: Path = VERIFY
             f"{res.stdout.strip()}\n"
             f"{res.stderr.strip()}\n\n"
             "Remediation:\n"
-            "  Resolve unrendered template tags or schema discrepancies in docs/DEVELOPMENT_VM.md\n"
+            "  Resolve unrendered template tags or schema discrepancies in docs/VM.md\n"
             "  before running deployment."
         )
 
@@ -115,7 +119,7 @@ def check_prerequisites(doc_path: Path = DOCS_PATH, verify_script: Path = VERIFY
 # ==============================================================================
 
 def parse_runbook(doc_path: Path = DOCS_PATH) -> dict[str, str]:
-    """Extracts all virtual machine and hypervisor parameters from docs/DEVELOPMENT_VM.md."""
+    """Extracts all virtual machine and hypervisor parameters from docs/VM.md."""
     if not doc_path.exists():
         return {}
 
@@ -846,7 +850,59 @@ def execute_status(params: dict) -> None:
     ret, sock_out, _ = run_cmd_status(["systemctl", "is-active", "devbox-proxy.socket"], host=host)
     proxy_status = "ACTIVE" if sock_out == "active" else "INACTIVE"
     print(f"\n[*] Hypervisor Forwarder: {proxy_status} (http://{host}:{ext_port}/)")
+
+    # Check Inventory Record
+    inv_vm_yaml = REPO_ROOT / "inventory" / host / vm_name / "vm.yaml"
+    if inv_vm_yaml.exists():
+        print(f"[*] Inventory Record: {inv_vm_yaml.relative_to(REPO_ROOT)} [RECORDED]")
+    else:
+        print(f"[*] Inventory Record: Not registered (run add_vmhost.py {host} to register)")
     print("============================================================\n")
+
+
+def sync_inventory_record(params: dict, action: str = "update", dry_run: bool = False) -> None:
+    """Synchronizes VM record with devbox_inventory skill."""
+    host = params.get("HYPERVISOR_HOST", "localhost")
+    vm_name = params.get("VM_NAME")
+    if not vm_name:
+        return
+
+    inventory_script = REPO_ROOT / ".agents" / "skills" / "devbox_inventory" / "scripts" / "add_vmhost.py"
+    inventory_root = REPO_ROOT / "inventory"
+
+    if action == "purge":
+        vm_dir = inventory_root / host / vm_name
+        if vm_dir.exists():
+            print(f"    -> Removing inventory record in {vm_dir.relative_to(REPO_ROOT)}...")
+            if not dry_run:
+                shutil.rmtree(vm_dir, ignore_errors=True)
+                print(f"    [✓] Inventory directory removed.")
+            else:
+                print(f"    [PLAN] Remove directory {vm_dir}")
+
+        if inventory_script.exists():
+            print(f"    -> Refreshing host inventory in inventory/{host}/vmhost.yaml...")
+            if not dry_run:
+                subprocess.run([sys.executable, str(inventory_script), host], capture_output=True, text=True)
+                print(f"    [✓] Host inventory refreshed.")
+            else:
+                print(f"    [PLAN] Refresh inventory: python3 {inventory_script} {host}")
+
+    elif action == "update":
+        if inventory_script.exists():
+            print(f"\n[*] Updating DevBox inventory (inventory/{host}/{vm_name}/vm.yaml)...")
+            if not dry_run:
+                res = subprocess.run(
+                    [sys.executable, str(inventory_script), host, "--vm", vm_name],
+                    capture_output=True,
+                    text=True,
+                )
+                if res.returncode == 0:
+                    print(f"    [✓] Inventory record synchronized successfully.")
+                else:
+                    print(f"    [-] Warning: Inventory sync returned code {res.returncode}")
+            else:
+                print(f"    [PLAN] python3 {inventory_script} {host} --vm {vm_name}")
 
 
 def execute_power_action(params: dict, action: str) -> None:
@@ -922,6 +978,9 @@ def execute_purge(params: dict, host: str, dry_run: bool = False) -> None:
     else:
         print(f"    [PLAN] ssh-keygen -R {vm_name} && ssh-keygen -R {params['VM_IP']}")
 
+    # Clean up inventory record
+    sync_inventory_record(params, action="purge", dry_run=dry_run)
+
     print(f"[✓] DevBox VM '{vm_name}' has been entirely removed from '{host}'.\n")
 
 
@@ -931,7 +990,7 @@ def execute_purge(params: dict, host: str, dry_run: bool = False) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="DevBox VM Deployment Engine — Deploys and manages the execution VM defined in docs/DEVELOPMENT_VM.md"
+        description="DevBox VM Deployment Engine — Deploys and manages the execution VM defined in docs/VM.md"
     )
     parser.add_argument("-n", "--dry-run", action="store_true", help="Simulate deployment plan without modifying hypervisor")
     parser.add_argument("--check-only", action="store_true", help="Verify pre-requisite gates and hypervisor connectivity only")
@@ -954,7 +1013,7 @@ def main():
     print("============================================================")
 
     # --------------------------------------------------------------------------
-    # MANDATORY GATE 1 & 2: docs/DEVELOPMENT_VM.md & verify_config.py
+    # MANDATORY GATE 1 & 2: docs/VM.md & verify_config.py
     # --------------------------------------------------------------------------
     prereq_ok, prereq_msg = check_prerequisites(doc_path=args.doc, verify_script=VERIFY_SCRIPT)
     print(prereq_msg)
@@ -1103,6 +1162,9 @@ def main():
 
             # Step 10: Create Baseline Pristine Snapshot
             create_baseline_snapshot(params, host, dry_run=False)
+
+            # Step 11: Auto-sync inventory
+            sync_inventory_record(params, action="update", dry_run=False)
     else:
         # Dry-run plan for post-boot steps
         print(f"\n[*] Waiting for VM '{vm_name}' to boot and respond to SSH...")
@@ -1113,6 +1175,8 @@ def main():
         validate_proxy_connection(params, dry_run=True)
         # Step 10: Pristine baseline snapshot (dry-run plan)
         create_baseline_snapshot(params, host, dry_run=True)
+        # Step 11: Auto-sync inventory (dry-run plan)
+        sync_inventory_record(params, action="update", dry_run=True)
 
     if args.dry_run:
         print("\n============================================================")

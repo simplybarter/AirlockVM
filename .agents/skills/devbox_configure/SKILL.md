@@ -2,14 +2,14 @@
 name: devbox_configure
 description: >-
   Facilitates configuring, parameterizing, and customizing the DevBox execution virtual machine runbook
-  (docs/DEVELOPMENT_VM.md) from a version-controlled template according to user preferences.
+  (docs/VM.md) from a version-controlled template according to user preferences.
   Use when the user wants to customize VM topology, IP addresses, hypervisor settings, resource specs,
   ports, or credentials for their local or remote development VM.
 ---
 
 # DevBox VM Configuration Skill (`devbox_configure`)
 
-This skill facilitates the customization and regeneration of the DevBox VM runbook and specification ([`docs/DEVELOPMENT_VM.md`](../../../docs/DEVELOPMENT_VM.md)) using a version-controlled template ([`template/DEVELOPMENT_VM.md.template`](./template/DEVELOPMENT_VM.md.template)) and default configuration parameters ([`template/defaults.json`](./template/defaults.json)).
+This skill facilitates the customization and regeneration of the DevBox VM runbook and specification ([`docs/VM.md`](../../../docs/VM.md)) using a version-controlled template ([`template/VM.md.template`](./template/VM.md.template)) and inventory schema validation.
 
 ---
 
@@ -19,8 +19,7 @@ This skill facilitates the customization and regeneration of the DevBox VM runbo
 .agents/skills/devbox_configure/
 ├── SKILL.md                          # Skill definition and instructions
 ├── template/
-│   ├── DEVELOPMENT_VM.md.template    # Parameterized runbook template
-│   └── defaults.json                 # Unpopulated parameter schema (empty values)
+│   └── VM.md.template                # Parameterized runbook template
 └── scripts/
     ├── configure_vm.py               # Main CLI, interactive, & file-driven customization tool
     ├── probe_hypervisor.py           # Smart hypervisor hardware & network discovery tool
@@ -33,6 +32,14 @@ This skill facilitates the customization and regeneration of the DevBox VM runbo
 
 ### Mode 1: Smart Auto-Discovery & Probing (Recommended)
 Automatically queries any target physical or local hypervisor to inspect hardware specs, libvirt networks, existing domains, DHCP leases, and suggests collision-free IP/MAC parameters.
+
+### Mode 1b: Inventory-Driven Offline Pre-Seeding
+When hypervisors are already documented in `inventory/` (via `devbox_inventory`), you can generate the runbook completely offline without making live network connections:
+
+```bash
+# Pre-seed runbook from inventory records (offline mode):
+python3 .agents/skills/devbox_configure/scripts/configure_vm.py --from-inventory barkley
+```
 
 * **Automated Pre-Flight Capability Checks**:
   Validates that the target host meets all essential virtualization prerequisites before attempting configuration:
@@ -98,32 +105,16 @@ To persist and version-control custom user profiles:
 
 ## Parameter Reference
 
-All keys are defined in [`template/defaults.json`](./template/defaults.json) with empty values (`""`), ready to be populated by the user.
+DevBox partitions configuration parameters cleanly between **Project & Guest Blueprint Defaults** (defined in [`template/defaults.json`](./template/defaults.json)) and **Infrastructure & Hypervisor State** (provided dynamically by [`devbox_inventory`](../devbox_inventory/SKILL.md)):
+
+### 1. Project & Guest Blueprint Defaults (`defaults.json`)
+Parameters specific to the development workstation, application stack, and provisioning recipe:
 
 | Parameter Name | Description | Example Value |
 | :--- | :--- | :--- |
 | `PROJECT_NAME` | Project display name | `MyProject` |
-| `VM_NAME` | libvirt domain name / SSH host alias | `myproject-vm` |
-| `HYPERVISOR_HOST` | Physical hypervisor hostname / SSH alias | `hypervisor-host` (or `localhost`) |
-| `HYPERVISOR_OS` | Operating system on hypervisor host | `Ubuntu 24.04 LTS` |
-| `HYPERVISOR_SPECS` | Hypervisor hardware summary | `8 Cores CPU \| 16 GB RAM \| KVM / libvirt` |
-| `HYPERVISOR_LAN_IP` | Hypervisor physical LAN IP | `192.168.1.100` |
 | `DEV_HOST` | Local development workstation hostname | `dev-workstation` |
-| `GUEST_OS` | Guest OS minimal cloud image name | `Ubuntu 24.04 LTS Minimal` |
-| `GUEST_OS_DETAILS` | Guest OS image release details | `Pristine Noble Numbat cloud image` |
-| `VCPU_CORES` | Number of virtual CPU cores assigned to guest | `4` |
-| `CPU_MODE` | KVM CPU mode | `host-passthrough` |
-| `RAM_MIB` | Guest RAM in MiB | `4096` |
-| `RAM_GB` | Guest RAM in GB (auto-calculated from RAM_MIB) | `4` |
-| `BALLOON_DRIVER` | Memory ballooning driver | `virtio-balloon` |
-| `DISK_SIZE_GIB` | Virtual root disk size in GiB | `50` |
-| `DISK_FORMAT` | Virtual disk image format | `qcow2` |
-| `UEFI_FIRMWARE` | UEFI code file name | `OVMF_CODE_4M.ms.fd` |
-| `VM_IP` | Static IP leased to the guest VM | `192.168.122.200` |
-| `SUBNET_CIDR` | Subnet CIDR notation | `/24` |
-| `VIRT_BRIDGE` | libvirt bridge network device | `virbr0` |
-| `LIBVIRT_NETWORK` | libvirt virtual network name | `default` |
-| `VM_MAC` | Static MAC address reserved in libvirt DHCP | `52:54:00:xx:xx:xx` |
+| `DEV_HOST_TITLE` | Capitalized workstation hostname | `Dev-workstation` |
 | `VM_PRIMARY_USER` | Primary guest user with passwordless sudo & docker | `devuser` |
 | `VM_SECONDARY_USER` | Secondary administrative user with sudo access | `admin` |
 | `SSH_KEY_PATH` | Path to dedicated SSH private key | `~/.ssh/myproject_vm_ed25519` |
@@ -131,8 +122,35 @@ All keys are defined in [`template/defaults.json`](./template/defaults.json) wit
 | `PROXY_EXTERNAL_PORT` | Hypervisor `systemd-socket-proxyd` forward port | `3001` |
 | `PROXY_SOCKET_SERVICE` | Path to systemd socket forwarder unit on hypervisor | `/etc/systemd/system/myproject-proxy.socket` |
 | `REMOTE_CODE_DIR` | Target path on guest VM for `rsync` code sync | `~/MyProject/` |
+| `GUEST_OS` | Guest OS minimal cloud image name | `Ubuntu 24.04 LTS Minimal` |
+| `GUEST_OS_DETAILS` | Guest OS image release details | `Pristine Noble Numbat cloud image` |
+| `CPU_MODE` | KVM CPU mode | `host-passthrough` |
+| `BALLOON_DRIVER` | Memory ballooning driver | `virtio-balloon` |
+| `DISK_SIZE_GIB` | Virtual root disk size in GiB | `50` |
+| `DISK_FORMAT` | Virtual disk image format | `qcow2` |
+| `UEFI_FIRMWARE` | UEFI code file name | `OVMF_CODE_4M.ms.fd` |
 | `SNAPSHOT_BASE_NAME` | Baseline snapshot name for rollback | `snapshot-base-clean` |
 | `SNAPSHOT_BASE_DESC` | Description tag for the baseline snapshot | `Pristine base setup with Docker and Python` |
+
+### 2. Infrastructure & Hypervisor Attributes (From `devbox_inventory`)
+Parameters discovered and populated from [`inventory/{vmhost}/vmhost.yaml`](../devbox_inventory/template/vmhost.yaml.template) and [`inventory/{vmhost}/{vm}/vm.yaml`](../devbox_inventory/template/vm.yaml.template):
+
+| Parameter Name | Description | Source in Inventory |
+| :--- | :--- | :--- |
+| `HYPERVISOR_HOST` | Hypervisor hostname / SSH alias | `vmhost.name` |
+| `HYPERVISOR_HOST_TITLE` | Capitalized hypervisor hostname | `vmhost.name.capitalize()` |
+| `HYPERVISOR_OS` | Operating system on hypervisor host | `vmhost.system.os.pretty_name` |
+| `HYPERVISOR_SPECS` | Hypervisor hardware summary | `vmhost.hardware.cpu` + `memory` |
+| `HYPERVISOR_LAN_IP` | Hypervisor physical LAN IP | `vmhost.connection.host` |
+| `VIRT_BRIDGE` | libvirt bridge network device | `vmhost.virtualization.networks[].bridge` |
+| `LIBVIRT_NETWORK` | libvirt virtual network name | `vmhost.virtualization.networks[].name` |
+| `SUBNET_CIDR` | Subnet CIDR notation | `vmhost.virtualization.networks[].netmask` |
+| `VM_NAME` | libvirt domain name / SSH alias | `vm.name` (collision-checked) |
+| `VM_IP` | Static IP leased to the guest VM | `vm.network.interfaces[].ip` / DHCP |
+| `VM_MAC` | Static MAC address reserved in libvirt | `vm.network.interfaces[].mac` |
+| `VCPU_CORES` | Virtual CPU cores assigned to guest | Proportional sizing / `vm.resources.vcpu` |
+| `RAM_MIB` | Guest RAM in MiB | Proportional sizing / `vm.resources.memory_mib` |
+| `RAM_GB` | Guest RAM in GB | `RAM_MIB // 1024` |
 
 ---
 

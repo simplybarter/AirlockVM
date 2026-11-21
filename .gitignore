@@ -1,7 +1,9 @@
 # Generated local VM runbook & sync scripts
+docs/VM.md
 docs/DEVELOPMENT_VM.md
 sync_to_devbox.sh
 analysis/
+inventory/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

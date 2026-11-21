@@ -29,13 +29,15 @@ DEFAULT_OUTPUT_SCRIPT = REPO_ROOT / "sync_to_devbox.sh"
 
 
 def detect_vm_target() -> tuple[str, str]:
-    """Inspects docs/DEVELOPMENT_VM.md or defaults to project name."""
+    """Inspects docs/VM.md or defaults to project name."""
     project_name = REPO_ROOT.name
     slug = re.sub(r"[^a-z0-9]+", "-", project_name.lower()).strip("-")
     default_vm_host = f"{slug}-vm"
     default_remote_dir = f"~/{project_name}/"
 
-    doc_path = REPO_ROOT / "docs" / "DEVELOPMENT_VM.md"
+    doc_path = REPO_ROOT / "docs" / "VM.md"
+    if not doc_path.exists():
+        doc_path = REPO_ROOT / "docs" / "DEVELOPMENT_VM.md"
     if doc_path.exists():
         content = doc_path.read_text(encoding="utf-8")
         # Look for rsync command pattern: ./ <host>:<dir>
@@ -76,6 +78,8 @@ def evaluate_project_exclusions() -> list[str]:
         "docs/",
         "*.md",
         "LICENSE",
+        "inventory/",
+        "analysis/",
         # Synchronization scripts
         "sync_to_devbox.sh",
         "install_skill.sh",
@@ -299,7 +303,7 @@ if [[ "$SKIP_CHECK" != "true" ]]; then
     echo "          User <vm_user>"
     echo "          IdentityFile ~/.ssh/<key>"
     echo ""
-    echo "Refer to docs/DEVELOPMENT_VM.md for the complete VM provisioning runbook."
+    echo "Refer to docs/VM.md for the complete VM provisioning runbook."
     echo ""
     exit 1
   fi

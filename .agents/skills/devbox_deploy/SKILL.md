@@ -2,14 +2,14 @@
 name: devbox_deploy
 description: >-
   Deploys, provisions, and manages the dedicated execution virtual machine defined in
-  'docs/DEVELOPMENT_VM.md'. Enforces strict pre-requisite verification gates: refuses to deploy
+  'docs/VM.md'. Enforces strict pre-requisite verification gates: refuses to deploy
   if the runbook does not exist or if 'verify_config.py' fails. Automates SSH keypair creation,
   static DHCP reservation, cloud-init image seeding, virt-install execution, and systemd socket proxying.
 ---
 
 # DevBox VM Deployment Skill (`devbox_deploy`)
 
-The `devbox_deploy` skill automates provisioning, launching, and managing the dedicated DevBox execution virtual machine specified in [`docs/DEVELOPMENT_VM.md`](../../../docs/DEVELOPMENT_VM.md).
+The `devbox_deploy` skill automates provisioning, launching, and managing the dedicated DevBox execution virtual machine specified in [`docs/VM.md`](../../../docs/VM.md).
 
 It provisions the guest virtual machine on the designated hypervisor (local KVM or remote physical host via SSH) and establishes zero-friction connectivity from your workstation.
 
@@ -32,15 +32,15 @@ To prevent accidental deployments of unconfigured, malformed, or incomplete envi
 
 ```mermaid
 flowchart TD
-    Start["Initiate Deployment (deploy_vm.py)"] --> Gate1{"Gate 1: Does docs/DEVELOPMENT_VM.md exist?"}
+    Start["Initiate Deployment (deploy_vm.py)"] --> Gate1{"Gate 1: Does docs/VM.md exist?"}
     Gate1 -- No --> Abort1["ABORT: Runbook missing<br/>Run /devbox_configure to generate"]
     Gate1 -- Yes --> Gate2{"Gate 2: Does verify_config.py pass (exit code 0)?"}
-    Gate2 -- No --> Abort2["ABORT: Unrendered tags or schema discrepancies<br/>Fix docs/DEVELOPMENT_VM.md before deploying"]
+    Gate2 -- No --> Abort2["ABORT: Unrendered tags or schema discrepancies<br/>Fix docs/VM.md before deploying"]
     Gate2 -- Yes --> Deploy["Proceed to Hypervisor Pre-Flight & Provisioning Pipeline"]
 ```
 
 1. **Gate 1: Runbook Existence Check**:
-   * Evaluates [`docs/DEVELOPMENT_VM.md`](../../../docs/DEVELOPMENT_VM.md).
+   * Evaluates [`docs/VM.md`](../../../docs/VM.md).
    * If missing, halts immediately and instructs the user to run `devbox_configure`.
 2. **Gate 2: Runbook Validation Check**:
    * Runs [`verify_config.py`](../devbox_configure/scripts/verify_config.py) on the runbook.
@@ -53,7 +53,7 @@ flowchart TD
 Once the prerequisite gates pass, `deploy_vm.py` executes the automated pipeline:
 
 1. **Runbook Parameter Extraction**:
-   * Parses domain name, hypervisor host, vCPUs, RAM, disk specs, static IP, MAC address, credentials, and proxy ports from [`docs/DEVELOPMENT_VM.md`](../../../docs/DEVELOPMENT_VM.md).
+   * Parses domain name, hypervisor host, vCPUs, RAM, disk specs, static IP, MAC address, credentials, and proxy ports from [`docs/VM.md`](../../../docs/VM.md).
 2. **Workstation Access Preparation**:
    * Generates a dedicated ED25519 SSH keypair (`~/.ssh/devbox_vm_ed25519`) if not already present.
    * Configures `Host <vm_name>` in your local `~/.ssh/config` (including transparent `ProxyJump` for remote hypervisors).
@@ -78,6 +78,10 @@ Once the prerequisite gates pass, `deploy_vm.py` executes the automated pipeline
 10. **Pristine Snapshot Creation**:
    * Polls SSH connectivity until the VM is online and cloud-init has finished.
    * Creates a pristine baseline disk snapshot (`snapshot-base-clean`) for instant disaster rollback.
+11. **Automated Inventory Synchronization**:
+   * Automatically registers the newly provisioned VM in `inventory/{vmhost}/{vm}/vm.yaml` via `devbox_inventory`.
+   * Refreshes the hypervisor host record in `inventory/{vmhost}/vmhost.yaml`.
+   * On `--purge`, cleans up the VM directory in `inventory/{vmhost}/{vm}/` and refreshes host records.
 
 ---
 

@@ -23,7 +23,7 @@ By strictly separating software engineering workstations from runtime execution 
 * **Proportional Resource Allocation**: Automatically discovers physical host CPU threads and total RAM, dynamically sizing guest vCPUs (e.g. 50% capacity) and memory (e.g. 25% capacity) to prevent host starvation.
 * **Conflict-Free Network Discovery**: Queries libvirt networks (such as `default` / `virbr0`), inspects active DHCP leases, allocates the next unassigned static IP, and generates unique collision-free MAC addresses (`52:54:00:xx:xx:xx`).
 * **Automated Project-to-VM Naming**: Derives the project name from the repository root folder, auto-generating domain names (`<project>-vm`), service units, and user accounts.
-* **Automated Virtual Machine Deployment (`devbox_deploy`)**: Launches the execution VM from `docs/DEVELOPMENT_VM.md` with strict pre-requisite verification gates (validates runbook existence and `verify_config.py` health), automated cloud-init image seeding, static DHCP reservations, and systemd socket forwarding.
+* **Automated Virtual Machine Deployment (`devbox_deploy`)**: Launches the execution VM from `docs/VM.md` with strict pre-requisite verification gates (validates runbook existence and `verify_config.py` health), automated cloud-init image seeding, static DHCP reservations, and systemd socket forwarding.
 * **Intelligent Code Synchronization (`devbox_rsync`)**: Evaluates project manifests (Python, Node.js, Rust, Go) and generates an optimized, git-ignored `sync_to_devbox.sh` script to sync ONLY application code to the VM while ignoring local caches and agent files.
 * **Antigravity AI Agent Skills**: Includes ready-to-use `.agents/skills/devbox_configure`, `.agents/skills/devbox_deploy`, and `.agents/skills/devbox_rsync` skills for autonomous agent-driven VM customization, provisioning, and workspace sync.
 
@@ -64,15 +64,30 @@ By strictly separating software engineering workstations from runtime execution 
 ├── LICENSE                                  # MIT License
 ├── install_skill.sh                         # Skill installer & updater script
 ├── sync_to_devbox.sh                        # Generated application sync script (git-ignored)
+├── inventory/                               # Documented hypervisors and VMs (git-ignored)
+│   └── {vmhost}/                            # VM host directory
+│       ├── vmhost.yaml                      # Documented host YAML record
+│       └── {vm}/                            # Virtual machine directory
+│           ├── vm.yaml                      # Documented VM record + blueprint
+│           └── VM.md                        # Rendered VM operational runbook
 ├── docs/                                    # Generated runbooks (git-ignored)
 │   ├── ARCHITECTURE.md                      # Security model and isolation topology
-│   └── DEVELOPMENT_VM.md                    # Generated VM execution runbook
+│   └── VM.md                                # Generated VM execution runbook
 ├── .agents/skills/
+│   ├── devbox_inventory/
+│   │   ├── SKILL.md                         # Inventory discovery & management skill
+│   │   ├── template/
+│   │   │   ├── vmhost.yaml.template         # Defined host YAML template
+│   │   │   ├── vm.yaml.template             # Defined VM YAML template
+│   │   │   └── defaults.json                # Schema and validation defaults
+│   │   └── scripts/
+│   │       ├── add_vmhost.py                # Hypervisor & VM discovery engine
+│   │       ├── inventory_manager.py         # Inventory inspection and query CLI
+│   │       └── verify_config.py             # Inventory syntax and validation linter
 │   ├── devbox_configure/
 │   │   ├── SKILL.md                         # Agent skill instructions and reference
 │   │   ├── template/
-│   │   │   ├── DEVELOPMENT_VM.md.template   # Parameterized runbook template
-│   │   │   └── defaults.json                # Unpopulated parameter schema
+│   │   │   └── VM.md.template               # Parameterized runbook template
 │   │   └── scripts/
 │   │       ├── configure_vm.py              # Primary customization and rendering engine
 │   │       ├── probe_hypervisor.py          # Hypervisor discovery and capability checker
@@ -92,7 +107,7 @@ By strictly separating software engineering workstations from runtime execution 
 
 ## Installation & Skill Setup
 
-You can install or update the DevBox agent skills (`devbox_configure`, `devbox_deploy`, `devbox_rsync`) into any repository or globally across your development environment using `install_skill.sh`:
+You can install or update the DevBox agent skills (`devbox_inventory`, `devbox_configure`, `devbox_deploy`, `devbox_rsync`) into any repository or globally across your development environment using `install_skill.sh`:
 
 ```bash
 # Option A: Install all skills into current repository (.agents/skills/*)
@@ -114,7 +129,22 @@ curl -fsSL https://raw.githubusercontent.com/SimplyBarter/DevBox/main/install_sk
 * Python 3.10 or higher.
 * Linux host with KVM/QEMU and `libvirtd` (either running locally or accessible over SSH).
 
-### 1. Auto-Probe and Generate Runbook
+### 1. Document Hypervisors & VMs in Inventory
+
+Profile any virtualization host and archive its hardware, networking, and virtual machines:
+
+```bash
+# Discover and document remote hypervisor:
+python3 .agents/skills/devbox_inventory/scripts/add_vmhost.py barkley
+
+# Discover and document local KVM host:
+python3 .agents/skills/devbox_inventory/scripts/add_vmhost.py localhost
+
+# List all documented hosts and VMs:
+python3 .agents/skills/devbox_inventory/scripts/inventory_manager.py list
+```
+
+### 2. Auto-Probe and Generate Runbook
 
 Run the configuration script targeting either `localhost` (for local KVM) or a remote hypervisor hostname:
 
@@ -126,15 +156,15 @@ python3 .agents/skills/devbox_configure/scripts/configure_vm.py --probe localhos
 python3 .agents/skills/devbox_configure/scripts/configure_vm.py --probe my-hypervisor-host
 ```
 
-### 2. Preview Changes (Dry-Run Mode)
+### 3. Preview Changes (Dry-Run Mode)
 
-To inspect differences before modifying `docs/DEVELOPMENT_VM.md`:
+To inspect differences before modifying `docs/VM.md`:
 
 ```bash
 python3 .agents/skills/devbox_configure/scripts/configure_vm.py --probe localhost --dry-run
 ```
 
-### 3. Interactive Guided Configuration
+### 4. Interactive Guided Configuration
 
 Step through prompts with discovered and default values shown in brackets:
 
@@ -142,7 +172,7 @@ Step through prompts with discovered and default values shown in brackets:
 python3 .agents/skills/devbox_configure/scripts/configure_vm.py --probe localhost --interactive
 ```
 
-### 4. Direct Parameter Overrides
+### 5. Direct Parameter Overrides
 
 Override specific variables directly from the command line:
 
@@ -154,7 +184,7 @@ python3 .agents/skills/devbox_configure/scripts/configure_vm.py \
   --set VCPU_CORES=4
 ```
 
-### 5. Validate Configuration
+### 6. Validate Configuration
 
 Ensure that all placeholders in the template are accounted for and no unrendered template tags exist:
 
@@ -162,9 +192,9 @@ Ensure that all placeholders in the template are accounted for and no unrendered
 python3 .agents/skills/devbox_configure/scripts/verify_config.py
 ```
 
-### 6. Deploy the Execution Virtual Machine
+### 7. Deploy the Execution Virtual Machine
 
-Launch the virtual machine defined in `docs/DEVELOPMENT_VM.md` with pre-requisite enforcement:
+Launch the virtual machine defined in `docs/VM.md` with pre-requisite enforcement:
 
 ```bash
 # Preview deployment plan (dry-run):
@@ -177,7 +207,7 @@ python3 .agents/skills/devbox_deploy/scripts/deploy_vm.py
 python3 .agents/skills/devbox_deploy/scripts/deploy_vm.py --yes
 ```
 
-### 7. Synchronize Application Code
+### 8. Synchronize Application Code
 
 Generate an optimized `sync_to_devbox.sh` script to mirror your project files into the VM:
 
@@ -209,6 +239,7 @@ If any check fails, the tool stops immediately and displays actionable troublesh
 
 This repository includes skill definitions compatible with Antigravity AI coding assistants. Agents can trigger these workflows using slash commands:
 
+* `/devbox_inventory` — Discover, profile, and document hypervisors and VMs in `inventory/{vmhost}/{vm}/`.
 * `/devbox_configure` — Probe hypervisors and generate parameterized VM execution runbooks.
 * `/devbox_deploy` — Deploy, provision, and manage execution VMs with strict validation gates.
 * `/devbox_rsync` — Evaluate project structure and generate the optimized `sync_to_devbox.sh` script.

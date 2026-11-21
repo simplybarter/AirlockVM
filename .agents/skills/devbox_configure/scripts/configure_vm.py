@@ -1,20 +1,44 @@
 #!/usr/bin/env python3
 """
 DevBox VM Configuration Script
-Facilitates customizing docs/DEVELOPMENT_VM.md from a parameterized template.
+Facilitates customizing docs/VM.md from a parameterized template.
 """
 
 import argparse
 import difflib
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
-DEFAULT_TEMPLATE_PATH = SKILL_DIR / "template" / "DEVELOPMENT_VM.md.template"
-DEFAULT_CONFIG_PATH = SKILL_DIR / "template" / "defaults.json"
+DEFAULT_TEMPLATE_PATH = SKILL_DIR / "template" / "VM.md.template"
+
+# Sensible blueprint defaults for standalone bootstrapping (when no inventory exists yet)
+DEFAULT_BLUEPRINT = {
+    "PROJECT_NAME": "",
+    "DEV_HOST": "",
+    "DEV_HOST_TITLE": "",
+    "VM_PRIMARY_USER": "devbox",
+    "VM_SECONDARY_USER": "",
+    "SSH_KEY_PATH": "",
+    "APP_INTERNAL_PORT": "3000",
+    "PROXY_EXTERNAL_PORT": "3001",
+    "PROXY_SOCKET_SERVICE": "",
+    "REMOTE_CODE_DIR": "",
+    "GUEST_OS": "Ubuntu 24.04 LTS Minimal",
+    "GUEST_OS_DETAILS": "Pristine Noble Numbat cloud image",
+    "CPU_MODE": "host-passthrough",
+    "BALLOON_DRIVER": "virtio-balloon",
+    "DISK_SIZE_GIB": "50",
+    "DISK_FORMAT": "qcow2",
+    "UEFI_FIRMWARE": "OVMF_CODE_4M.ms.fd",
+    "SNAPSHOT_BASE_NAME": "snapshot-base-clean",
+    "SNAPSHOT_BASE_DESC": "Pristine base setup with Docker and Python",
+}
 
 
 def find_repo_root() -> Path:
@@ -29,7 +53,7 @@ def find_repo_root() -> Path:
 
 REPO_ROOT = find_repo_root()
 DEFAULT_PROJECT_NAME = REPO_ROOT.name
-DEFAULT_OUTPUT_PATH = REPO_ROOT / "docs" / "DEVELOPMENT_VM.md"
+DEFAULT_OUTPUT_PATH = REPO_ROOT / "docs" / "VM.md"
 
 PARAM_DESCRIPTIONS = {
     "PROJECT_NAME": "Project Display Name (e.g. MyProject)",
@@ -65,11 +89,158 @@ PARAM_DESCRIPTIONS = {
 }
 
 
-def load_defaults(path: Path = DEFAULT_CONFIG_PATH) -> dict:
-    if path.exists():
+def load_defaults(path: Path | None = None) -> dict:
+    if path and path.exists():
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {}
+    return dict(DEFAULT_BLUEPRINT)
+
+
+def load_from_inventory(host: str, repo_root: Path, target_vm: str | None = None) -> dict:
+    """Pre-seeds hypervisor parameters and avoids collisions from inventory/{host}/vmhost.yaml."""
+    host_dir = repo_root / "inventory" / host
+    yaml_file = host_dir / "vmhost.yaml"
+    if not yaml_file.exists():
+        print(f"Error: Inventory record for host '{host}' not found at {yaml_file}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[*] Pre-seeding configuration from inventory: {yaml_file.relative_to(repo_root)}")
+    content = yaml_file.read_text(encoding="utf-8")
+    data = {}
+    try:
+        import yaml
+        parsed = yaml.safe_load(content)
+        vmhost = parsed.get("vmhost", {})
+        sys_info = vmhost.get("system", {})
+        hw_info = vmhost.get("hardware", {})
+        cpu_info = hw_info.get("cpu", {})
+        mem_info = hw_info.get("memory", {})
+        virt_info = vmhost.get("virtualization", {})
+        nets = virt_info.get("networks", [])
+        primary_net = nets[0] if nets else {}
+
+        total_cores = cpu_info.get("total_cores", 4)
+        total_ram_mb = mem_info.get("total_mib", 16384)
+        cpu_model = cpu_info.get("model", "CPU")
+        ram_gb_str = str(mem_info.get("total_gb", 16))
+
+        # Proportional sizing calculations
+        if total_cores <= 2:
+            vcpu = 1
+        elif total_cores <= 4:
+            vcpu = 2
+        elif total_cores <= 8:
+            vcpu = 4
+        elif total_cores <= 16:
+            vcpu = 6
+        else:
+            vcpu = 8
+
+        if total_ram_mb <= 4096:
+            ram_mib = 2048
+        elif total_ram_mb <= 8192:
+            ram_mib = 4096
+        elif total_ram_mb <= 16384:
+            ram_mib = 4096
+        elif total_ram_mb <= 32768:
+            ram_mib = 8192
+        elif total_ram_mb <= 65536:
+            ram_mib = 16384
+        else:
+            ram_mib = 32768
+
+        # Collision prevention from recorded VMs & DHCP reservations
+        existing_domains = [d.get("name") for d in vmhost.get("vms", {}).get("domains", [])]
+        assigned_ips = set()
+        for n in nets:
+            for sh in n.get("static_reservations", []):
+                if sh.get("ip"):
+                    assigned_ips.add(sh["ip"])
+
+        proj_slug = re.sub(r"[^a-z0-9]+", "-", DEFAULT_PROJECT_NAME.lower()).strip("-")
+        cand_vm_name = target_vm or f"{proj_slug}-vm"
+        if not target_vm and cand_vm_name in existing_domains:
+            idx = 1
+            while f"{proj_slug}-vm-{idx:02d}" in existing_domains:
+                idx += 1
+            cand_vm_name = f"{proj_slug}-vm-{idx:02d}"
+
+        subnet_base = primary_net.get("ip", "192.168.122.1")
+        base_prefix = ".".join(subnet_base.split(".")[:3])
+        proposed_ip = f"{base_prefix}.236"
+        for octet in range(236, 250):
+            cand_ip = f"{base_prefix}.{octet}"
+            if cand_ip not in assigned_ips:
+                proposed_ip = cand_ip
+                break
+
+        data = {
+            "PROJECT_NAME": DEFAULT_PROJECT_NAME,
+            "DEV_HOST": subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip() or "workstation",
+            "DEV_HOST_TITLE": (subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip() or "workstation").capitalize(),
+            "VM_SECONDARY_USER": subprocess.run(["whoami"], capture_output=True, text=True).stdout.strip() or "devuser",
+            "HYPERVISOR_HOST": host,
+            "HYPERVISOR_HOST_TITLE": host.capitalize(),
+            "HYPERVISOR_OS": sys_info.get("os", {}).get("pretty_name", "Linux"),
+            "HYPERVISOR_SPECS": f"{total_cores} Cores {cpu_model} | {ram_gb_str} GB RAM | KVM / libvirt",
+            "HYPERVISOR_LAN_IP": vmhost.get("connection", {}).get("host", host),
+            "GUEST_OS": "Ubuntu 24.04 LTS Minimal",
+            "GUEST_OS_DETAILS": "Pristine Noble Numbat cloud image",
+            "CPU_MODE": "host-passthrough",
+            "BALLOON_DRIVER": "virtio-balloon",
+            "DISK_SIZE_GIB": "50",
+            "DISK_FORMAT": "qcow2",
+            "UEFI_FIRMWARE": "OVMF_CODE_4M.ms.fd",
+            "VIRT_BRIDGE": primary_net.get("bridge", "virbr0"),
+            "LIBVIRT_NETWORK": primary_net.get("name", "default"),
+            "SUBNET_CIDR": "/24",
+            "VM_IP": proposed_ip,
+            "VM_MAC": f"52:54:00:{os.urandom(3).hex(':')}",
+            "VM_NAME": cand_vm_name,
+            "VM_PRIMARY_USER": proj_slug.replace("-", ""),
+            "SSH_KEY_PATH": f"~/.ssh/{proj_slug.replace('-', '')}_vm_ed25519",
+            "APP_INTERNAL_PORT": "3000",
+            "PROXY_EXTERNAL_PORT": "3001",
+            "PROXY_SOCKET_SERVICE": f"/etc/systemd/system/{proj_slug}-proxy.socket",
+            "REMOTE_CODE_DIR": f"~/{DEFAULT_PROJECT_NAME}/",
+            "SNAPSHOT_BASE_NAME": "snapshot-base-clean",
+            "SNAPSHOT_BASE_DESC": "Pristine base setup with Docker and Python",
+            "VCPU_CORES": str(vcpu),
+            "RAM_MIB": str(ram_mib),
+            "RAM_GB": str(ram_mib // 1024),
+        }
+
+        # If a specific VM is targeted and has a blueprint in inventory, load its blueprint values
+        effective_vm = target_vm or (f"{proj_slug}-vm" if (host_dir / f"{proj_slug}-vm" / "vm.yaml").exists() else None)
+        if effective_vm and (host_dir / effective_vm / "vm.yaml").exists():
+            vm_yaml_path = host_dir / effective_vm / "vm.yaml"
+            parsed_vm = yaml.safe_load(vm_yaml_path.read_text(encoding="utf-8"))
+            vm_obj = parsed_vm.get("vm", {})
+            bp = vm_obj.get("blueprint", {})
+            if bp:
+                print(f"[*] Layering blueprint from {vm_yaml_path.relative_to(repo_root)}")
+                if bp.get("project_name"): data["PROJECT_NAME"] = bp["project_name"]
+                if bp.get("primary_user"): data["VM_PRIMARY_USER"] = bp["primary_user"]
+                if bp.get("secondary_user"): data["VM_SECONDARY_USER"] = bp["secondary_user"]
+                if bp.get("ssh_key_path"): data["SSH_KEY_PATH"] = bp["ssh_key_path"]
+                if bp.get("app_internal_port"): data["APP_INTERNAL_PORT"] = str(bp["app_internal_port"])
+                if bp.get("proxy_external_port"): data["PROXY_EXTERNAL_PORT"] = str(bp["proxy_external_port"])
+                if bp.get("proxy_socket_service"): data["PROXY_SOCKET_SERVICE"] = bp["proxy_socket_service"]
+                if bp.get("remote_code_dir"): data["REMOTE_CODE_DIR"] = bp["remote_code_dir"]
+                if bp.get("guest_os"): data["GUEST_OS"] = bp["guest_os"]
+                if bp.get("guest_os_details"): data["GUEST_OS_DETAILS"] = bp["guest_os_details"]
+                if bp.get("cpu_mode"): data["CPU_MODE"] = bp["cpu_mode"]
+                if bp.get("balloon_driver"): data["BALLOON_DRIVER"] = bp["balloon_driver"]
+                if bp.get("disk_size_gib"): data["DISK_SIZE_GIB"] = str(bp["disk_size_gib"])
+                if bp.get("disk_format"): data["DISK_FORMAT"] = bp["disk_format"]
+                if bp.get("uefi_firmware"): data["UEFI_FIRMWARE"] = bp["uefi_firmware"]
+                if bp.get("snapshot_base_name"): data["SNAPSHOT_BASE_NAME"] = bp["snapshot_base_name"]
+                if bp.get("snapshot_base_desc"): data["SNAPSHOT_BASE_DESC"] = bp["snapshot_base_desc"]
+
+    except Exception as e:
+        print(f"Warning: Failed to load inventory from {yaml_file}: {e}", file=sys.stderr)
+
+    return data
 
 
 def render_template(template_str: str, params: dict) -> tuple[str, list[str]]:
@@ -169,7 +340,7 @@ def show_diff(original: str, new: str, original_name: str, new_name: str) -> Non
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Customize DevBox DEVELOPMENT_VM.md from template"
+        description="Customize DevBox VM.md from template"
     )
     parser.add_argument(
         "--template",
@@ -182,6 +353,18 @@ def main():
         type=str,
         metavar="HYPERVISOR_HOST",
         help="Auto-discover hardware, libvirt network, next free IP, and collision-free MAC from hypervisor host/IP (use 'localhost' for local KVM)",
+    )
+    parser.add_argument(
+        "--from-inventory",
+        type=str,
+        metavar="VMHOST",
+        help="Pre-seed configuration from existing inventory/{vmhost}/vmhost.yaml (offline mode)",
+    )
+    parser.add_argument(
+        "--vm",
+        type=str,
+        metavar="VM_NAME",
+        help="Target a specific virtual machine domain when configuring from inventory",
     )
     parser.add_argument(
         "--skip-preflight",
@@ -221,9 +404,8 @@ def main():
     parser.add_argument(
         "--dump-defaults",
         type=Path,
-        nargs="?",
-        const=DEFAULT_CONFIG_PATH,
-        help="Dump default parameters to a JSON file and exit",
+        metavar="PATH",
+        help="Dump default blueprint parameters to a JSON file and exit",
     )
     parser.add_argument(
         "--dry-run",
@@ -241,9 +423,14 @@ def main():
         return
 
     # 1. Start with defaults
-    params = load_defaults(DEFAULT_CONFIG_PATH)
+    params = load_defaults()
 
-    # 1b. Layer auto-discovered parameters if --probe is passed
+    # 1b. Layer inventory parameters if --from-inventory is passed
+    if args.from_inventory:
+        inv_params = load_from_inventory(args.from_inventory, REPO_ROOT, target_vm=args.vm)
+        params.update(inv_params)
+
+    # 1c. Layer auto-discovered parameters if --probe is passed
     if args.probe:
         try:
             from probe_hypervisor import probe_all, HypervisorCapabilityError
@@ -320,6 +507,14 @@ def main():
         f.write(rendered)
 
     print(f"Successfully generated {args.output}")
+
+    # Also update VM runbook in inventory if targeted from inventory
+    if args.from_inventory and params.get("VM_NAME"):
+        vm_inv_dir = REPO_ROOT / "inventory" / args.from_inventory / params["VM_NAME"]
+        if vm_inv_dir.exists():
+            vm_runbook_path = vm_inv_dir / "VM.md"
+            vm_runbook_path.write_text(rendered, encoding="utf-8")
+            print(f"Updated inventory VM runbook: {vm_runbook_path.relative_to(REPO_ROOT)}")
     if original_content and original_content != rendered:
         print("Updated document with customized preferences.")
     elif not original_content:

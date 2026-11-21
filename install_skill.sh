@@ -9,7 +9,7 @@ set -euo pipefail
 DEFAULT_REPO="https://github.com/SimplyBarter/DevBox.git"
 REPO_URL="${DEVBOX_REPO:-$DEFAULT_REPO}"
 BRANCH="${DEVBOX_BRANCH:-main}"
-DEFAULT_SKILLS=("devbox_configure" "devbox_rsync" "devbox_deploy")
+DEFAULT_SKILLS=("devbox_configure" "devbox_rsync" "devbox_deploy" "devbox_inventory")
 CHOSEN_SKILL=""
 
 # Determine target directory
@@ -26,7 +26,7 @@ Usage:
 Options:
   -l, --local             Install into current project (.agents/skills) [Default]
   -g, --global            Install globally (~/.agents/skills)
-  -s, --skill <name>      Install a specific skill (devbox_configure, devbox_rsync, devbox_deploy). Default: all
+  -s, --skill <name>      Install a specific skill (devbox_configure, devbox_rsync, devbox_deploy, devbox_inventory). Default: all
   -t, --target <path>     Install into a custom target base directory
   -r, --repo <url>        Git repository URL (Default: $DEFAULT_REPO)
   -b, --branch <branch>   Git branch (Default: $BRANCH)
@@ -118,8 +118,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ -d "$LOCAL_SKILLS_ROOT" && "$LOCAL_SKILLS_ROOT" != "$TARGET_BASE" ]]; then
-  echo "[*] Installing from local repository source: $LOCAL_SKILLS_ROOT"
+if [[ -d "$LOCAL_SKILLS_ROOT" ]]; then
+  echo "[*] Using local repository skills source: $LOCAL_SKILLS_ROOT"
   SOURCE_BASE="$LOCAL_SKILLS_ROOT"
 else
   echo "[*] Fetching latest skill files from $REPO_URL ($BRANCH)..."
@@ -150,22 +150,28 @@ for SKILL_NAME in "${SKILLS[@]}"; do
 
   mkdir -p "$TARGET_DIR"
 
-  # Copy SKILL.md
-  if [[ -f "$SOURCE_DIR/SKILL.md" ]]; then
-    cp "$SOURCE_DIR/SKILL.md" "$TARGET_DIR/SKILL.md"
-  fi
+  if [[ "$SOURCE_DIR" != "$TARGET_DIR" ]]; then
+    # Copy SKILL.md
+    if [[ -f "$SOURCE_DIR/SKILL.md" ]]; then
+      cp "$SOURCE_DIR/SKILL.md" "$TARGET_DIR/SKILL.md"
+    fi
 
-  # Copy template directory if exists
-  if [[ -d "$SOURCE_DIR/template" ]]; then
-    mkdir -p "$TARGET_DIR/template"
-    cp -r "$SOURCE_DIR/template/." "$TARGET_DIR/template/"
-  fi
+    # Copy template directory if exists
+    if [[ -d "$SOURCE_DIR/template" ]]; then
+      mkdir -p "$TARGET_DIR/template"
+      cp -r "$SOURCE_DIR/template/." "$TARGET_DIR/template/"
+    fi
 
-  # Copy scripts directory if exists
-  if [[ -d "$SOURCE_DIR/scripts" ]]; then
-    mkdir -p "$TARGET_DIR/scripts"
-    cp -r "$SOURCE_DIR/scripts/." "$TARGET_DIR/scripts/"
-    find "$TARGET_DIR/scripts" -type f -name "*.py" -exec chmod +x {} +
+    # Copy scripts directory if exists
+    if [[ -d "$SOURCE_DIR/scripts" ]]; then
+      mkdir -p "$TARGET_DIR/scripts"
+      cp -r "$SOURCE_DIR/scripts/." "$TARGET_DIR/scripts/"
+      find "$TARGET_DIR/scripts" -type f -name "*.py" -exec chmod +x {} +
+    fi
+  else
+    if [[ -d "$TARGET_DIR/scripts" ]]; then
+      find "$TARGET_DIR/scripts" -type f -name "*.py" -exec chmod +x {} +
+    fi
   fi
 
   echo "    [✓] Files for '$SKILL_NAME' copied."
@@ -185,10 +191,12 @@ echo "============================================================"
 echo ""
 echo "To use the skills in your project:"
 echo "  - In Chat / AI Assistant:"
+echo "      /devbox_inventory  (Discover and document hypervisors and VMs)"
 echo "      /devbox_configure  (Generate VM execution runbook)"
 echo "      /devbox_deploy     (Deploy and provision virtual machine)"
 echo "      /devbox_rsync      (Generate application code sync script)"
 echo "  - From CLI:"
+echo "      python3 $TARGET_BASE/devbox_inventory/scripts/add_vmhost.py <vmhost>"
 echo "      python3 $TARGET_BASE/devbox_configure/scripts/configure_vm.py --probe localhost"
 echo "      python3 $TARGET_BASE/devbox_deploy/scripts/deploy_vm.py"
 echo "      python3 $TARGET_BASE/devbox_rsync/scripts/generate_sync.py"

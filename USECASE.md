@@ -73,21 +73,25 @@ Your workstation host OS remains untouched, clean, and fast.
 
 ## How DevBox Automates This Setup
 
-DevBox takes care of all setup friction automatically:
-1. **Detects Local KVM**: Probes your hardware to ensure `/dev/kvm` and `virbr0` are available (`devbox_configure`).
-2. **Calculates Proportional Sizing**: Allocates 50% vCPUs and ~25% RAM to the VM so your workstation desktop never freezes.
-3. **Generates the Exact Runbook**: Creates your step-by-step operational specification ([`docs/DEVELOPMENT_VM.md`](docs/DEVELOPMENT_VM.md)).
-4. **Automated VM Provisioning**: Provisions domain, cloud-init seed, static DHCP, and socket proxying (`devbox_deploy`).
+DevBox takes care of all setup friction automatically across a cohesive 4-skill lifecycle:
+
+1. **Discovers Hypervisor & VMs**: Scans local or remote KVM hosts, documenting hardware, storage pools, networks, and existing VMs into structured YAML records (`devbox_inventory`).
+2. **Detects Capabilities & Sizes Headroom**: Ensures `/dev/kvm` and `virbr0` are available, calculating proportional vCPU and RAM allocations so your workstation never freezes (`devbox_configure`).
+3. **Generates the Exact Runbook**: Creates your step-by-step operational specification ([`docs/VM.md`](docs/VM.md)) with zero leftover placeholders.
+4. **Automated VM Provisioning & Inventory Sync**: Provisions domain, cloud-init seed, static DHCP, and socket proxying, auto-registering the VM in inventory (`devbox_deploy`).
 5. **Intelligent Code Synchronization**: Excludes heavy local caches and copies only application files (`devbox_rsync`).
 
 To set this up for your machine:
 ```bash
-# 1. Configure the runbook:
+# 1. Discover and document the hypervisor host:
+python3 .agents/skills/devbox_inventory/scripts/add_vmhost.py localhost
+
+# 2. Configure the runbook:
 python3 .agents/skills/devbox_configure/scripts/configure_vm.py --probe localhost
 
-# 2. Deploy the VM:
+# 3. Deploy the VM (auto-registers in inventory):
 python3 .agents/skills/devbox_deploy/scripts/deploy_vm.py --yes
 
-# 3. Generate the sync script:
+# 4. Generate the sync script:
 python3 .agents/skills/devbox_rsync/scripts/generate_sync.py
 ```
