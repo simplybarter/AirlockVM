@@ -19,12 +19,15 @@ By strictly separating software engineering workstations from runtime execution 
 ## Key Features
 
 * **Universal & Zero-Assumption**: Operates seamlessly across local KVM installations or remote physical hypervisors via SSH, without hardcoded machine names or private IP addresses.
+* **Dual Topology Support**: Enables both **Option A (Dedicated Execution VM)** via `devbox_create_vm` and **Option B (Shared Worker Attach)** via `devbox_attach_app` based on project isolation needs.
+* **Autonomous Intelligence Engines**: Built-in Python engines for deployability pre-flight gates (`preflight.py`), live configuration drift & reconciliation (`drift.py`), multi-layer crash diagnostics (`diagnostics.py`), guest workload profiling & rightsizing (`profiler.py`), and workstation zero-workload invariant verification (`security.py`).
 * **Smart Pre-Flight Capability Checks**: Automatically inspects target hypervisors for `/dev/kvm` hardware acceleration, CPU virtualization extensions (`vmx`/`svm`), active `libvirtd` daemons, and storage space before provisioning.
 * **Proportional Resource Allocation**: Automatically discovers physical host CPU threads and total RAM, dynamically sizing guest vCPUs (e.g. 50% capacity) and memory (e.g. 25% capacity) to prevent host starvation.
 * **Conflict-Free Network Discovery**: Queries libvirt networks (such as `default` / `virbr0`), inspects active DHCP leases, allocates the next unassigned static IP, and generates unique collision-free MAC addresses (`52:54:00:xx:xx:xx`).
 * **Automated Project-to-VM Naming**: Derives the project name from the repository root folder, auto-generating domain names (`<project>-vm`), service units, and user accounts.
 * **Automated Virtual Machine Deployment (`devbox_deploy`)**: Launches the execution VM using `inventory/{vmhost}/{vm}/vm.yaml` as the Single Source of Truth (SSOT) with strict pre-requisite verification gates, automated cloud-init image seeding, static DHCP reservations, and systemd socket forwarding.
 * **Intelligent Code Synchronization (`devbox_rsync`)**: Evaluates project manifests (Python, Node.js, Rust, Go) and generates an optimized `deploy_app_to_vm.sh` script to deploy ONLY application code to the VM while ignoring local caches and agent files.
+* **Multi-IDE Client Connector (`connect_devbox.sh`)**: One-command client onboarding across VS Code, Cursor, Claude Code, Antigravity, Windsurf, and JetBrains with zero manual JSON edits.
 * **Antigravity AI Agent Skills**: Includes ready-to-use `.agents/skills/devbox_inventory`, `.agents/skills/devbox_configure`, `.agents/skills/devbox_deploy`, and `.agents/skills/devbox_rsync` skills for autonomous agent-driven hypervisor discovery, VM customization, provisioning, and workspace sync.
 
 ---
@@ -64,12 +67,23 @@ By strictly separating software engineering workstations from runtime execution 
 ├── LICENSE                                  # MIT License
 ├── pyproject.toml                           # Modern PEP 621 packaging & CLI entry points
 ├── requirements.txt                         # Package dependencies (pyyaml, mcp)
-├── connect_devbox.sh                        # Client onboarding & MCP registration script
+├── connect_devbox.sh                        # Multi-IDE onboarding & MCP registration script
 ├── deploy_app_to_vm.sh                      # Multi-VM application deployment dispatcher
-├── src/devbox/                              # DevBox Python package
+├── src/devbox/                              # DevBox Python package & Intelligence Engines
 │   ├── __init__.py                          # Package initialization
+│   ├── detector.py                          # Stack & port inference engine
+│   ├── diagnostics.py                       # Multi-layer failure diagnosis & recovery
+│   ├── drift.py                             # Configuration drift audit & reconciliation
+│   ├── network.py                           # Conflict-free IP & MAC allocation engine
+│   ├── placement.py                         # Multi-hypervisor host placement optimizer
+│   ├── ports.py                             # Intelligent external proxy port allocator
+│   ├── preflight.py                         # Live non-destructive deployability audit
+│   ├── profiler.py                          # Live guest RAM/swap/CPU workload profiler
+│   ├── security.py                          # Workstation zero-workload & secret leak audit
 │   └── mcp/                                 # Model Context Protocol service
-│       └── server.py                        # DevBox MCP Server (stdio transport)
+│       └── server.py                        # DevBox FastMCP Server (21 declarative tools)
+├── tests/                                   # Integration & permutation test suites
+│   └── test_integration_permutations.py     # 26-permutation end-to-end test suite
 ├── inventory/                               # Documented hypervisors and VMs (git-ignored)
 │   └── {vmhost}/                            # VM host directory
 │       ├── vmhost.yaml                      # Documented host YAML record
@@ -80,7 +94,7 @@ By strictly separating software engineering workstations from runtime execution 
 ├── docs/                                    # Architecture, security & MCP documentation
 │   ├── ARCHITECTURE.md                      # Security model and isolation topology
 │   ├── MCP_SERVER.md                        # Model Context Protocol server reference
-│   └── INTEGRATION_TESTING.md               # End-to-end integration testing guide
+│   └── INTEGRATION_TESTING.md               # End-to-end integration testing guide & matrix
 ├── .agents/skills/                          # Core DevBox automation engines
 │   ├── devbox_inventory/                    # Hypervisor discovery and inventory management
 │   ├── devbox_configure/                    # Parameterized VM sizing and runbook generation
@@ -237,6 +251,19 @@ When using `--probe <host>`, DevBox performs automated health checks:
 5. **Storage & Memory**: Checks for sufficient host RAM and free disk space.
 
 If any check fails, the tool stops immediately and displays actionable troubleshooting commands.
+
+---
+
+## Integration Testing & Permutation Matrix
+
+DevBox includes a full 26-permutation integration test suite covering observability, stack detection, placement, dedicated VM lifecycles, shared attach idempotency, drift detection, diagnostics, security isolation, and multi-IDE CLI connectors:
+
+```bash
+# Run the complete test suite:
+.venv/bin/python -m unittest tests/test_integration_permutations.py -v
+```
+
+See the [Integration Testing Guide](docs/INTEGRATION_TESTING.md) for the complete 26-permutation matrix and fixture details.
 
 ---
 

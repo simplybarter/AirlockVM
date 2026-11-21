@@ -84,8 +84,8 @@ The MCP server exposes standard, declarative tools enabling agents to inspect, d
 
 | Tool Name | Parameters | Description |
 | :--- | :--- | :--- |
-| `devbox_find_port` | `vm_name: str`<br/>`internal_port: int = 3000`<br/>`preferred_port: int = 0` | Audits both inventory reservations and live hypervisor TCP listening sockets over SSH to discover and return the next clean, conflict-free external proxy port. |
-| `devbox_alloc_network` | `vmhost: str`<br/>`network_name: str = "default"` | Audits libvirt network definitions and reservations, allocating the next available static IP and generating a collision-free MAC address (`52:54:00:xx:xx:xx`). |
+| `devbox_find_port` | `vm_name: str = ""` <br/>`internal_port: int = 3000`<br/>`preferred_port: int = 0`<br/>`vmhost: str = ""` | Audits both inventory reservations and live hypervisor TCP listening sockets over SSH to discover and return the next clean, conflict-free external proxy port. Auto-selects hypervisor if omitted. |
+| `devbox_alloc_network` | `vmhost: str = ""` <br/>`network_name: str = "default"` | Audits libvirt network definitions and reservations, allocating the next available static IP and generating a collision-free MAC address (`52:54:00:xx:xx:xx`). Auto-detects hypervisor if omitted. |
 | `devbox_select_host` | `required_vcpu: int = 2`<br/>`required_ram_mib: int = 2048`<br/>`required_disk_gb: int = 20` | Audits CPU, available RAM headroom, and running VMs across registered hypervisors to select the optimal host for placement. |
 
 ### 3.3. Lifecycle, Safety & Power Management
@@ -169,3 +169,16 @@ DevBox enforces strict security boundaries between the developer workstation, cl
 2. **Private Inventory**: Hypervisor details, SSH access definitions, and guest configuration templates in `inventory/` are strictly local to DevBox and excluded from version control (`.gitignore`).
 3. **Dedicated Port Proxying**: Workloads listening on internal guest ports (e.g. `3000`) are mapped on the hypervisor host via isolated `systemd-socket-proxyd` instances (`{vm_name}-p{ext_port}-proxy.socket`). The local workstation does not run background SSH tunnels or expose local ports.
 4. **Principle of Least Privilege**: AI agents interacting with client applications only receive high-level MCP tool invocations (`devbox_deploy_app`, `devbox_status`). The agent does not need root credentials or raw SSH execution on hypervisor nodes.
+
+---
+
+## 6. Integration Testing & Permutation Coverage
+
+Every tool and sub-engine exposed by the DevBox MCP Server is verified through an automated 26-permutation test suite (`tests/test_integration_permutations.py`):
+
+```bash
+# Execute full MCP server permutation suite:
+.venv/bin/python -m unittest tests/test_integration_permutations.py -v
+```
+
+See [Integration Testing Guide](INTEGRATION_TESTING.md) for full details on test fixtures, topologies, and verification criteria.

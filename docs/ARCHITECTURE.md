@@ -88,6 +88,15 @@ flowchart TD
 
 ## 6. Standalone Control Plane & MCP Server
 
-To decouple infrastructure logic from application repositories, DevBox operates as a standalone **Model Context Protocol (MCP)** server:
-* AI coding agents access DevBox tools (`devbox_deploy_app`, `devbox_status`, `devbox_deploy_vm`) without installing virtualization scripts in client projects.
-* See [MCP Server Documentation](MCP_SERVER.md) for architecture, tool definitions, and integration guides.
+To decouple infrastructure logic from application repositories, DevBox operates as a standalone **Model Context Protocol (MCP)** server (`devbox-mcp`):
+* AI coding agents access DevBox tools (`devbox_create_vm`, `devbox_attach_app`, `devbox_preflight`, `devbox_deploy_vm`, `devbox_deploy_app`) without installing virtualization scripts in client projects.
+* **Dual Topology Model**:
+  - **Option A (Dedicated Execution VM)**: Isolated KVM domain with dedicated static IP, MAC, operational runbook (`VM.md`), and independent proxy sockets (`devbox_create_vm`).
+  - **Option B (Shared Staging Worker)**: Multiple decoupled application repositories mapped onto a shared worker VM with isolated remote code directories and independent proxy ports (`devbox_attach_app`).
+* **Autonomous Intelligence Engines**:
+  - **Deployability Pre-Flight** (`preflight.py`): Non-destructive pre-flight verification confirming SSH, `/dev/kvm`, `libvirtd`, IP silence, port clearance, and RAM safety headroom with confidence scoring.
+  - **Configuration Drift & Reconciliation** (`drift.py`): Audits live hypervisor domain and systemd proxy units against inventory SSOT, detecting discrepancies in vCPUs, RAM, and proxy units.
+  - **Workload Profiler** (`profiler.py`): Real-time guest CPU, RAM, and swap monitoring providing rightsizing guidance to reclaim hypervisor resources.
+  - **Crash Diagnostics** (`diagnostics.py`): Multi-layer failure diagnosis across systemd journal logs, TCP port listeners, and proxy sockets with automated recovery guidance.
+  - **Security & Workstation Invariant** (`security.py`): Automated secret leak scanning and verification of zero runtime workloads on the development workstation.
+* See [MCP Server Documentation](MCP_SERVER.md) for full architecture and tool definitions, and [Integration Testing Guide](INTEGRATION_TESTING.md) for verification.
