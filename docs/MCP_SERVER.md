@@ -13,8 +13,8 @@ DevBox addresses this by acting as a **centralized, standalone Infrastructure Co
 ```mermaid
 flowchart TD
     subgraph ClientProjects["Client Workspaces (Pure Application Code)"]
-        A["AppSurfer<br/>(/projects/AppSurfer)"]
-        B["NoHumanRequired<br/>(/projects/NoHumanRequired)"]
+        A["AppSurfer"]
+        B["NoHumanRequired"]
         C["Other Repositories..."]
     end
 
@@ -54,7 +54,7 @@ flowchart TD
 The DevBox MCP Server runs in an isolated Python virtual environment configured via modern PEP 621 packaging:
 
 * **Python Runtime**: Python 3.14 (`>=3.14`)
-* **Packaging Specification**: [pyproject.toml](file:///home/mother/projects/priv/2026/DevBox/pyproject.toml) managed with `hatchling`
+* **Packaging Specification**: [pyproject.toml](../pyproject.toml) managed with `hatchling`
 * **MCP SDK**: `mcp>=2.3.0` (`mcp.server.mcpserver.MCPServer`)
 * **Transport**: Standard I/O (`stdio`), enabling zero-network local agent execution with immediate lifecycle termination when the agent disconnects.
 * **Console Entry Point**: `devbox-mcp` (points to `devbox.mcp.server:main`)
@@ -102,7 +102,7 @@ To enable DevBox tools in any project or globally in Antigravity / Claude Code /
 {
   "mcpServers": {
     "devbox": {
-      "command": "/home/mother/projects/priv/2026/DevBox/.venv/bin/devbox-mcp"
+      "command": "/path/to/DevBox/.venv/bin/devbox-mcp"
     }
   }
 }
@@ -114,7 +114,7 @@ Or using direct Python execution:
 {
   "mcpServers": {
     "devbox": {
-      "command": "/home/mother/projects/priv/2026/DevBox/.venv/bin/python",
+      "command": "/path/to/DevBox/.venv/bin/python",
       "args": ["-m", "devbox.mcp.server"]
     }
   }
@@ -127,7 +127,7 @@ DevBox provides a helper script (`connect_devbox.sh`) to automatically register 
 
 ```bash
 # Connect a specific project
-./connect_devbox.sh --target /home/mother/projects/priv/2026/AppSurfer
+./connect_devbox.sh --target /path/to/AppSurfer
 
 # Connect globally for the current user
 ./connect_devbox.sh --global
