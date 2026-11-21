@@ -546,7 +546,7 @@ def main():
         help="Skip pre-flight virtualization capability checks",
     )
     parser.add_argument("--save-config", type=Path, help="Save discovered parameters to JSON config")
-    parser.add_argument("--apply", action="store_true", help="Render docs/VM.md immediately with discovered values")
+    parser.add_argument("--apply", action="store_true", help="Render inventory VM runbook immediately with discovered values")
     args = parser.parse_args()
 
     try:
@@ -575,7 +575,7 @@ def main():
     elif not args.save_config:
         print("\n--- Discovered Configuration (JSON Preview) ---")
         print(json.dumps(config, indent=2))
-        print("\nTo apply these settings to docs/VM.md, run with --apply or --save-config <path>")
+        print("\nTo apply these settings to inventory VM runbook, run with --apply or --save-config <path>")
 
 
 if __name__ == "__main__":

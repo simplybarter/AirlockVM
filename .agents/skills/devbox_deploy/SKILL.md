@@ -1,15 +1,16 @@
 ---
 name: devbox_deploy
 description: >-
-  Deploys, provisions, and manages the dedicated execution virtual machine defined in
-  'docs/VM.md'. Enforces strict pre-requisite verification gates: refuses to deploy
-  if the runbook does not exist or if 'verify_config.py' fails. Automates SSH keypair creation,
-  static DHCP reservation, cloud-init image seeding, virt-install execution, and systemd socket proxying.
+  Deploys, provisions, and manages dedicated execution virtual machines using
+  'inventory/{vmhost}/{vm}/vm.yaml' as the Single Source of Truth (SSOT). Enforces strict
+  pre-requisite verification gates: refuses to deploy if the configuration does not exist
+  or if verification fails. Automates SSH keypair creation, static DHCP reservation,
+  cloud-init image seeding, virt-install execution, and systemd socket proxying.
 ---
 
 # DevBox VM Deployment Skill (`devbox_deploy`)
 
-The `devbox_deploy` skill automates provisioning, launching, and managing the dedicated DevBox execution virtual machine specified in [`docs/VM.md`](../../../docs/VM.md).
+The `devbox_deploy` skill automates provisioning, launching, and managing dedicated DevBox execution virtual machines specified in `inventory/{vmhost}/{vm}/vm.yaml` (SSOT), with `inventory/{vmhost}/{vm}/VM.md` as supplementary documentation.
 
 It provisions the guest virtual machine on the designated hypervisor (local KVM or remote physical host via SSH) and establishes zero-friction connectivity from your workstation.
 
@@ -32,19 +33,19 @@ To prevent accidental deployments of unconfigured, malformed, or incomplete envi
 
 ```mermaid
 flowchart TD
-    Start["Initiate Deployment (deploy_vm.py)"] --> Gate1{"Gate 1: Does docs/VM.md exist?"}
-    Gate1 -- No --> Abort1["ABORT: Runbook missing<br/>Run /devbox_configure to generate"]
-    Gate1 -- Yes --> Gate2{"Gate 2: Does verify_config.py pass (exit code 0)?"}
-    Gate2 -- No --> Abort2["ABORT: Unrendered tags or schema discrepancies<br/>Fix docs/VM.md before deploying"]
+    Start["Initiate Deployment (deploy_vm.py)"] --> Gate1{"Gate 1: Does vm.yaml exist in inventory/?"}
+    Gate1 -- No --> Abort1["ABORT: Specification missing<br/>Run /devbox_inventory to discover & register"]
+    Gate1 -- Yes --> Gate2{"Gate 2: Does verify_config pass (exit code 0)?"}
+    Gate2 -- No --> Abort2["ABORT: Unrendered tags or schema discrepancies<br/>Fix vm.yaml before deploying"]
     Gate2 -- Yes --> Deploy["Proceed to Hypervisor Pre-Flight & Provisioning Pipeline"]
 ```
 
-1. **Gate 1: Runbook Existence Check**:
-   * Evaluates [`docs/VM.md`](../../../docs/VM.md).
-   * If missing, halts immediately and instructs the user to run `devbox_configure`.
-2. **Gate 2: Runbook Validation Check**:
-   * Runs [`verify_config.py`](../devbox_configure/scripts/verify_config.py) on the runbook.
-   * If any unrendered template placeholders (`{{ VARIABLE }}`) or schema errors are present, halts immediately and prints error details.
+1. **Gate 1: Configuration Existence Check (SSOT)**:
+   * Evaluates the VM operational specification (`inventory/{vmhost}/{vm}/vm.yaml`).
+   * If missing, halts immediately and instructs the user to run `devbox_inventory`.
+2. **Gate 2: Configuration & Runbook Validation Check**:
+   * Validates YAML syntax and checks for unrendered template placeholders (`{{ VARIABLE }}`).
+   * If supplementary runbook `VM.md` exists, validates it via [`verify_config.py`](../devbox_configure/scripts/verify_config.py).
 
 ---
 
@@ -52,8 +53,8 @@ flowchart TD
 
 Once the prerequisite gates pass, `deploy_vm.py` executes the automated pipeline:
 
-1. **Runbook Parameter Extraction**:
-   * Parses domain name, hypervisor host, vCPUs, RAM, disk specs, static IP, MAC address, credentials, and proxy ports from [`docs/VM.md`](../../../docs/VM.md).
+1. **Structured Parameter Loading**:
+   * Directly extracts domain name, hypervisor host, vCPUs, RAM, disk specs, static IP, MAC address, credentials, and proxy ports from `inventory/{vmhost}/{vm}/vm.yaml`.
 2. **Workstation Access Preparation**:
    * Generates a dedicated ED25519 SSH keypair (`~/.ssh/devbox_vm_ed25519`) if not already present.
    * Configures `Host <vm_name>` in your local `~/.ssh/config` (including transparent `ProxyJump` for remote hypervisors).

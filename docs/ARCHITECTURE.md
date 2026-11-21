@@ -54,3 +54,32 @@ Local Workstation                  Hypervisor Host               Dedicated Guest
    virsh snapshot-create-as --domain <vm-name> --name snapshot-base-clean --disk-only
    ```
    If testing produces clutter or modified dependencies, the environment can be restored to its pristine baseline state within seconds.
+
+---
+
+## 5. Agent Skills Lifecycle Architecture
+
+DevBox provides four complementary, composable skills for autonomous AI agents and command-line automation. The workflow operates as an automated lifecycle:
+
+```mermaid
+flowchart TD
+    Inv["1. devbox_inventory<br/>Discover & record hypervisors & VMs<br/>(inventory/{vmhost}/)"] --> Conf["2. devbox_configure<br/>Parameterize VM runbook from template<br/>(VM.md.template -> VM.md)"]
+    Conf --> Deploy["3. devbox_deploy<br/>Enforce pre-flight gates, provision domain,<br/>cloud-init seed & socket proxy"]
+    Deploy --> Rsync["4. devbox_rsync<br/>Evaluate project manifest & exclude rules,<br/>synchronize code (sync_to_devbox.sh)"]
+```
+
+### Stage 1: Discovery & Documentation (`devbox_inventory`)
+* **Role**: Inspects physical or local hypervisors via SSH or local libvirt, documenting hardware specifications, libvirt virtual networks, storage pools, and existing virtual machine domains.
+* **Artifacts**: Maintains structured YAML records (`inventory/{vmhost}/vmhost.yaml` and `inventory/{vmhost}/{vm}/vm.yaml`).
+
+### Stage 2: Configuration & Sizing (`devbox_configure`)
+* **Role**: Parameterizes the single source-of-truth template (`VM.md.template`) to produce an operational runbook (`VM.md`).
+* **Heuristics**: Calculates proportional vCPU and RAM allocations, ensures collision-free static IP and MAC assignments, and maps proxy forwarding ports.
+
+### Stage 3: Provisioning & Lifecycle Management (`devbox_deploy`)
+* **Role**: Enforces mandatory verification gates before hypervisor execution, generates cloud-init NoCloud ISO seeds, provisions KVM domains via `virt-install`, configures static DHCP reservations, and establishes persistent systemd socket proxying.
+* **Lifecycle**: Provides full lifecycle commands (`--start`, `--stop`, `--status`, `--snapshot`, `--rollback`, `--validate-proxy`).
+
+### Stage 4: Workload Synchronization (`devbox_rsync`)
+* **Role**: Evaluates project manifests (`package.json`, `requirements.txt`, etc.) and dynamically builds an optimized synchronization script (`sync_to_devbox.sh`).
+* **Boundary**: Strictly excludes local developer caches, IDE state, documentation, agent configs, and version control directories, ensuring only necessary runtime application code reaches the execution VM.

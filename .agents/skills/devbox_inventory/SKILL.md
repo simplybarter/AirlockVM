@@ -130,6 +130,6 @@ python3 .agents/skills/devbox_inventory/scripts/verify_config.py
 The DevBox workflow integrates four complementary skills:
 
 1. **`devbox_inventory`**: Discovers and documents existing hypervisors and VMs in `inventory/{vmhost}/{vm}/`.
-2. **`devbox_configure`**: Generates a parameterized VM runbook (`docs/VM.md`) tailored to the discovered hypervisor.
+2. **`devbox_configure`**: Generates a parameterized VM runbook (`inventory/{vmhost}/{vm}/VM.md`) tailored to the discovered hypervisor.
 3. **`devbox_deploy`**: Provisions, launches, and proxies the dedicated development VM.
 4. **`devbox_rsync`**: Deploys application source code and synchronizes development changes into the running VM.

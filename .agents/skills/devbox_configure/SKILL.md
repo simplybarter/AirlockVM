@@ -1,15 +1,15 @@
 ---
 name: devbox_configure
 description: >-
-  Facilitates configuring, parameterizing, and customizing the DevBox execution virtual machine runbook
-  (docs/VM.md) from a version-controlled template according to user preferences.
+  Facilitates configuring, parameterizing, and customizing DevBox execution virtual machine runbooks
+  (inventory/{vmhost}/{vm}/VM.md) from a version-controlled template according to user preferences.
   Use when the user wants to customize VM topology, IP addresses, hypervisor settings, resource specs,
   ports, or credentials for their local or remote development VM.
 ---
 
 # DevBox VM Configuration Skill (`devbox_configure`)
 
-This skill facilitates the customization and regeneration of the DevBox VM runbook and specification ([`docs/VM.md`](../../../docs/VM.md)) using a version-controlled template ([`template/VM.md.template`](./template/VM.md.template)) and inventory schema validation.
+This skill facilitates the customization and regeneration of DevBox VM runbooks and specifications (`inventory/{vmhost}/{vm}/VM.md`) using a version-controlled template ([`template/VM.md.template`](./template/VM.md.template)) and inventory schema validation.
 
 ---
 

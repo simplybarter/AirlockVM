@@ -10,6 +10,11 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
 
@@ -29,26 +34,40 @@ DEFAULT_OUTPUT_SCRIPT = REPO_ROOT / "sync_to_devbox.sh"
 
 
 def detect_vm_target() -> tuple[str, str]:
-    """Inspects docs/VM.md or defaults to project name."""
+    """Inspects VM specification in inventory/ or defaults to project name."""
     project_name = REPO_ROOT.name
     slug = re.sub(r"[^a-z0-9]+", "-", project_name.lower()).strip("-")
     default_vm_host = f"{slug}-vm"
     default_remote_dir = f"~/{project_name}/"
 
-    doc_path = REPO_ROOT / "docs" / "VM.md"
-    if not doc_path.exists():
-        doc_path = REPO_ROOT / "docs" / "DEVELOPMENT_VM.md"
-    if doc_path.exists():
-        content = doc_path.read_text(encoding="utf-8")
-        # Look for rsync command pattern: ./ <host>:<dir>
-        rsync_match = re.search(r"rsync[^\n]+(?:\./|\.\s+)\s+([a-zA-Z0-9_\-\.]+):([~a-zA-Z0-9_\-\/\.]+)", content)
-        if rsync_match:
-            return rsync_match.group(1), rsync_match.group(2)
+    inv_dir = REPO_ROOT / "inventory"
+    if inv_dir.exists():
+        # First check vm.yaml as SSOT
+        yaml_candidates = list(inv_dir.glob(f"*/{slug}-vm/vm.yaml")) + sorted(inv_dir.glob("*/*/vm.yaml"))
+        for yp in yaml_candidates:
+            if yp.exists() and yaml is not None:
+                try:
+                    doc = yaml.safe_load(yp.read_text(encoding="utf-8")) or {}
+                    vm_data = doc.get("vm", {})
+                    bp = vm_data.get("blueprint", {})
+                    vm_name = vm_data.get("name", default_vm_host)
+                    remote_dir = bp.get("remote_code_dir", default_remote_dir)
+                    return vm_name, remote_dir
+                except Exception:
+                    pass
 
-        # Look for Host block in SSH config snippet
-        host_match = re.search(r"Host\s+([a-zA-Z0-9_\-\.]+)", content)
-        if host_match:
-            default_vm_host = host_match.group(1)
+        # Fallback to VM.md if present
+        md_candidates = list(inv_dir.glob(f"*/{slug}-vm/VM.md")) + sorted(inv_dir.glob("*/*/VM.md"))
+        for mp in md_candidates:
+            if mp.exists():
+                content = mp.read_text(encoding="utf-8")
+                rsync_match = re.search(r"rsync[^\n]+(?:\./|\.\s+)\s+([a-zA-Z0-9_\-\.]+):([~a-zA-Z0-9_\-\/\.]+)", content)
+                if rsync_match:
+                    return rsync_match.group(1), rsync_match.group(2)
+                host_match = re.search(r"Host\s+([a-zA-Z0-9_\-\.]+)", content)
+                if host_match:
+                    default_vm_host = host_match.group(1)
+                break
 
     return default_vm_host, default_remote_dir
 
@@ -303,7 +322,7 @@ if [[ "$SKIP_CHECK" != "true" ]]; then
     echo "          User <vm_user>"
     echo "          IdentityFile ~/.ssh/<key>"
     echo ""
-    echo "Refer to docs/VM.md for the complete VM provisioning runbook."
+    echo "Refer to inventory/<vmhost>/$TARGET_VM/VM.md for the complete VM provisioning runbook."
     echo ""
     exit 1
   fi

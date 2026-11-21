@@ -25,11 +25,6 @@ def find_repo_root() -> Path:
 
 
 REPO_ROOT = find_repo_root()
-DOCS_PATH = (
-    REPO_ROOT / "docs" / "VM.md"
-    if (REPO_ROOT / "docs" / "VM.md").exists() or not (REPO_ROOT / "docs" / "DEVELOPMENT_VM.md").exists()
-    else REPO_ROOT / "docs" / "DEVELOPMENT_VM.md"
-)
 INVENTORY_TEMPLATES_DIR = REPO_ROOT / ".agents" / "skills" / "devbox_inventory" / "template"
 
 # Direct mapping of VM.md placeholders provided by devbox_inventory
@@ -99,25 +94,47 @@ def check_rendered_doc(doc_path: Path) -> bool:
             print(f"INFO: {doc_path} not found, checking backup {alt_path}...")
             doc_path = alt_path
         else:
-            print(f"NOTICE: Rendered document {doc_path} does not exist yet (run configure_vm.py to generate it).")
+            print(f"NOTICE: Rendered document {doc_path} does not exist.")
             return True
     content = doc_path.read_text(encoding="utf-8")
     leftovers = re.findall(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}", content)
     if leftovers:
         print(f"ERROR: Unrendered template tags remain in {doc_path}: {set(leftovers)}")
         return False
-    print(f"OK: {doc_path} has zero leftover template tags.")
+    print(f"OK: {doc_path.relative_to(REPO_ROOT) if doc_path.is_relative_to(REPO_ROOT) else doc_path} has zero leftover template tags.")
     return True
+
+
+def check_all_inventory_runbooks(repo_root: Path) -> bool:
+    inv_dir = repo_root / "inventory"
+    if not inv_dir.exists():
+        print("NOTICE: No inventory directory found to audit.")
+        return True
+    vm_runbooks = sorted(inv_dir.glob("*/*/VM.md"))
+    if not vm_runbooks:
+        print("NOTICE: No VM.md runbooks found in inventory/ to audit.")
+        return True
+
+    print(f"Auditing {len(vm_runbooks)} inventory runbook(s) in {inv_dir.relative_to(repo_root)}/...")
+    all_ok = True
+    for rb in vm_runbooks:
+        if not check_rendered_doc(rb):
+            all_ok = False
+    return all_ok
 
 
 def main():
     parser = argparse.ArgumentParser(description="Verify DevBox template and docs against inventory schema")
-    parser.add_argument("--doc", type=Path, default=DOCS_PATH, help="Path to rendered markdown document")
+    parser.add_argument("--doc", type=Path, default=None, help="Path to specific rendered markdown document to verify")
     args = parser.parse_args()
 
     placeholders = check_template_syntax(TEMPLATE_PATH)
     coverage_ok = check_inventory_schema_coverage(placeholders)
-    doc_ok = check_rendered_doc(args.doc)
+
+    if args.doc:
+        doc_ok = check_rendered_doc(args.doc)
+    else:
+        doc_ok = check_all_inventory_runbooks(REPO_ROOT)
 
     if coverage_ok and doc_ok:
         print("\nAll checks passed successfully!")

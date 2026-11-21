@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
 DevBox Virtual Machine Deployment Engine (deploy_vm.py)
-Deploys, provisions, and manages the dedicated execution VM defined in docs/VM.md.
+Deploys, provisions, and manages dedicated execution VMs using inventory/{vmhost}/{vm}/vm.yaml
+as the Single Source of Truth (SSOT), with VM.md as supplementary documentation.
 
 Enforces two strict pre-flight gates:
-  1. docs/VM.md MUST exist.
-  2. .agents/skills/devbox_configure/scripts/verify_config.py MUST exit cleanly (code 0).
+  1. VM specification (vm.yaml) MUST exist in inventory/.
+  2. verify_config.py MUST exit cleanly (code 0).
 """
 
 import argparse
@@ -20,6 +21,11 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
@@ -37,12 +43,93 @@ def find_repo_root() -> Path:
 
 
 REPO_ROOT = find_repo_root()
-DOCS_PATH = (
-    REPO_ROOT / "docs" / "VM.md"
-    if (REPO_ROOT / "docs" / "VM.md").exists() or not (REPO_ROOT / "docs" / "DEVELOPMENT_VM.md").exists()
-    else REPO_ROOT / "docs" / "DEVELOPMENT_VM.md"
-)
 VERIFY_SCRIPT = REPO_ROOT / ".agents" / "skills" / "devbox_configure" / "scripts" / "verify_config.py"
+
+
+def find_default_config(vm_name: str | None = None) -> tuple[Path | None, Path | None]:
+    """Finds the default VM specification (vm.yaml as SSOT) and optional runbook (VM.md)."""
+    inv_dir = REPO_ROOT / "inventory"
+    if not inv_dir.exists():
+        return None, None
+
+    yaml_candidates = []
+    if vm_name:
+        yaml_candidates.extend(inv_dir.glob(f"*/{vm_name}/vm.yaml"))
+
+    proj_slug = re.sub(r"[^a-z0-9]+", "-", REPO_ROOT.name.lower()).strip("-")
+    yaml_candidates.extend(inv_dir.glob(f"*/{proj_slug}-vm/vm.yaml"))
+    yaml_candidates.extend(sorted(inv_dir.glob("*/*/vm.yaml")))
+
+    for yf in yaml_candidates:
+        if yf.exists():
+            runbook = yf.parent / "VM.md"
+            return yf, (runbook if runbook.exists() else None)
+
+    return None, None
+
+
+def load_vm_config(config_path: Path) -> dict[str, str]:
+    """Loads VM and hypervisor parameters from inventory/{vmhost}/{vm}/vm.yaml (SSOT) or fallback VM.md."""
+    if not config_path or not config_path.exists():
+        return {}
+
+    # If markdown file is passed, fall back to legacy parse_runbook
+    if config_path.suffix == ".md":
+        return parse_runbook(config_path)
+
+    text = config_path.read_text(encoding="utf-8")
+    if yaml is not None:
+        try:
+            doc = yaml.safe_load(text) or {}
+        except Exception as e:
+            raise ValueError(f"Failed to parse YAML from {config_path}: {e}")
+    else:
+        raise RuntimeError("PyYAML ('yaml') module is required to parse vm.yaml")
+
+    vm_data = doc.get("vm", {})
+    bp = vm_data.get("blueprint", {})
+    resources = vm_data.get("resources", {})
+    interfaces = vm_data.get("network", {}).get("interfaces", [])
+    primary_iface = interfaces[0] if interfaces else {}
+
+    # Check parent directory for vmhost.yaml
+    host_data = {}
+    vmhost_yaml = config_path.parent.parent / "vmhost.yaml"
+    if vmhost_yaml.exists() and yaml is not None:
+        try:
+            hdoc = yaml.safe_load(vmhost_yaml.read_text(encoding="utf-8")) or {}
+            host_data = hdoc.get("vmhost", {})
+        except Exception:
+            pass
+
+    hypervisor_host = vm_data.get("host") or host_data.get("name") or host_data.get("alias") or "localhost"
+
+    params = {
+        "VM_NAME": str(vm_data.get("name", "devbox-vm")),
+        "HYPERVISOR_HOST": str(hypervisor_host),
+        "HYPERVISOR_LAN_IP": str(host_data.get("system", {}).get("network", {}).get("lan_ip", "")),
+        "GUEST_OS": str(bp.get("guest_os", "Ubuntu 24.04 LTS Minimal")),
+        "VCPU_CORES": str(resources.get("vcpu", 4)),
+        "CPU_MODE": str(bp.get("cpu_mode", "host-passthrough")),
+        "RAM_MIB": str(resources.get("memory_mib", 4096)),
+        "DISK_SIZE_GIB": str(bp.get("disk_size_gib", 50)),
+        "DISK_FORMAT": str(bp.get("disk_format", "qcow2")),
+        "UEFI_FIRMWARE": str(bp.get("uefi_firmware", "OVMF_CODE_4M.ms.fd")),
+        "VM_IP": str(primary_iface.get("ip", "192.168.122.200")),
+        "VM_MAC": str(primary_iface.get("mac", "52:54:00:12:34:56")),
+        "VIRT_BRIDGE": str(primary_iface.get("source", "virbr0")),
+        "LIBVIRT_NETWORK": "default",
+        "VM_PRIMARY_USER": str(bp.get("primary_user", "devbox")),
+        "VM_SECONDARY_USER": str(bp.get("secondary_user", "")),
+        "SSH_KEY_PATH": str(bp.get("ssh_key_path", "~/.ssh/devbox_vm_ed25519")),
+        "PROXY_SOCKET_SERVICE": str(bp.get("proxy_socket_service", "/etc/systemd/system/devbox-proxy.socket")),
+        "PROXY_EXTERNAL_PORT": str(bp.get("proxy_external_port", 3001)),
+        "APP_INTERNAL_PORT": str(bp.get("app_internal_port", 3000)),
+        "SNAPSHOT_BASE_NAME": str(bp.get("snapshot_base_name", "snapshot-base-clean")),
+        "SNAPSHOT_BASE_DESC": str(bp.get("snapshot_base_desc", "Pristine base setup with Docker and Python")),
+        "REMOTE_CODE_DIR": str(bp.get("remote_code_dir", "~/DevBox/")),
+    }
+    return params
 
 
 def run_cmd_status(cmd: list[str], host: str | None = None) -> tuple[int, str, str]:
@@ -70,57 +157,71 @@ def run_cmd_status(cmd: list[str], host: str | None = None) -> tuple[int, str, s
 # Mandatory Pre-requisite Gates
 # ==============================================================================
 
-def check_prerequisites(doc_path: Path = DOCS_PATH, verify_script: Path = VERIFY_SCRIPT) -> tuple[bool, str]:
+def check_prerequisites(
+    config_path: Path | None = None,
+    runbook_path: Path | None = None,
+    verify_script: Path = VERIFY_SCRIPT,
+) -> tuple[bool, str]:
     """Enforces the mandatory prerequisite gates before any deployment action.
 
-    Gate 1: docs/VM.md must exist.
-    Gate 2: verify_config.py must exit with code 0.
+    Gate 1: VM specification (inventory/{vmhost}/{vm}/vm.yaml) MUST exist as SSOT.
+    Gate 2: Configuration must be syntactically valid with zero unrendered tags.
     """
-    # Gate 1: Check document existence
-    if not doc_path.exists():
+    # Gate 1: Check document/config existence
+    if config_path is None or not config_path.exists():
         return False, (
-            f"[!] Pre-requisite Gate 1 FAILED: '{doc_path}' does not exist.\n\n"
-            "The execution VM runbook must be generated and parameterized before deployment.\n"
+            f"[!] Pre-requisite Gate 1 FAILED: VM specification not found ({config_path}).\n\n"
+            "An operational VM specification (vm.yaml) must exist in inventory/ before deployment.\n"
             "Remediation:\n"
-            "  Run the configuration skill to probe your hypervisor and generate the runbook:\n"
-            "    - In AI Assistant: /devbox_configure\n"
-            "    - Via CLI:         python3 .agents/skills/devbox_configure/scripts/configure_vm.py --probe localhost\n"
+            "  Run devbox_inventory to discover and document the hypervisor and VMs:\n"
+            "    python3 .agents/skills/devbox_inventory/scripts/add_vmhost.py <vmhost>\n"
+            "  Or specify an existing configuration via --config <path> or --vm <vm_name>.\n"
         )
 
-    # Gate 2: Check verify_config.py script existence and execution
-    if not verify_script.exists():
+    # Gate 2: Check for unrendered template tags in config
+    text = config_path.read_text(encoding="utf-8")
+    leftovers = re.findall(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}", text)
+    if leftovers:
         return False, (
-            f"[!] Pre-requisite Gate 2 FAILED: Verification tool '{verify_script}' not found.\n"
-            "Please ensure the devbox_configure skill is installed at .agents/skills/devbox_configure."
-        )
-
-    res = subprocess.run(
-        [sys.executable, str(verify_script), "--doc", str(doc_path)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    if res.returncode != 0:
-        return False, (
-            f"[!] Pre-requisite Gate 2 FAILED: Configuration verification reported errors.\n\n"
-            f"Output from verify_config.py:\n"
-            f"{res.stdout.strip()}\n"
-            f"{res.stderr.strip()}\n\n"
+            f"[!] Pre-requisite Gate 2 FAILED: Unrendered template tags remain in {config_path}:\n"
+            f"  {set(leftovers)}\n"
             "Remediation:\n"
-            "  Resolve unrendered template tags or schema discrepancies in docs/VM.md\n"
-            "  before running deployment."
+            "  Fill in all template placeholders in vm.yaml before deploying."
         )
 
-    return True, f"[✓] All pre-requisite gates passed ({doc_path.name} exists and verification succeeded)."
+    # Validate YAML syntax
+    if config_path.suffix in (".yaml", ".yml") and yaml is not None:
+        try:
+            yaml.safe_load(text)
+        except Exception as e:
+            return False, f"[!] Pre-requisite Gate 2 FAILED: Invalid YAML in {config_path}: {e}"
+
+    # Verify supplementary runbook if present
+    if runbook_path and runbook_path.exists() and verify_script.exists():
+        res = subprocess.run(
+            [sys.executable, str(verify_script), "--doc", str(runbook_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if res.returncode != 0:
+            return False, (
+                f"[!] Pre-requisite Gate 2 FAILED: Supplementary runbook verification reported errors.\n\n"
+                f"Output from verify_config.py:\n"
+                f"{res.stdout.strip()}\n"
+                f"{res.stderr.strip()}"
+            )
+
+    return True, f"[✓] All pre-requisite gates passed ({config_path.relative_to(REPO_ROOT) if config_path.is_relative_to(REPO_ROOT) else config_path.name} verified as SSOT)."
 
 
 # ==============================================================================
 # Runbook Parameter Extraction
 # ==============================================================================
 
-def parse_runbook(doc_path: Path = DOCS_PATH) -> dict[str, str]:
-    """Extracts all virtual machine and hypervisor parameters from docs/VM.md."""
-    if not doc_path.exists():
+def parse_runbook(doc_path: Path) -> dict[str, str]:
+    """Extracts all virtual machine and hypervisor parameters from VM.md."""
+    if not doc_path or not doc_path.exists():
         return {}
 
     content = doc_path.read_text(encoding="utf-8")
@@ -990,7 +1091,7 @@ def execute_purge(params: dict, host: str, dry_run: bool = False) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="DevBox VM Deployment Engine — Deploys and manages the execution VM defined in docs/VM.md"
+        description="DevBox VM Deployment Engine — Deploys and manages the execution VM using inventory/{vmhost}/{vm}/vm.yaml (SSOT)"
     )
     parser.add_argument("-n", "--dry-run", action="store_true", help="Simulate deployment plan without modifying hypervisor")
     parser.add_argument("--check-only", action="store_true", help="Verify pre-requisite gates and hypervisor connectivity only")
@@ -1004,24 +1105,52 @@ def main():
     parser.add_argument("--snapshot", nargs="?", const="default", help="Create a snapshot (optional snapshot name)")
     parser.add_argument("--rollback", nargs="?", const="default", help="Revert to baseline or named snapshot")
     parser.add_argument("-y", "--yes", action="store_true", help="Auto-confirm deployment without interactive prompt")
-    parser.add_argument("--doc", type=Path, default=DOCS_PATH, help="Path to rendered runbook markdown")
+    parser.add_argument("--vm", type=str, help="Target VM domain name in inventory (e.g. devbox-vm)")
+    parser.add_argument("--config", type=Path, default=None, help="Path to VM specification YAML (default: auto-detected from inventory)")
+    parser.add_argument("--doc", type=Path, default=None, help="Path to supplementary runbook markdown or custom specification")
     args = parser.parse_args()
+
+    if args.config:
+        config_path = args.config
+        runbook_path = args.doc or (config_path.parent / "VM.md" if (config_path.parent / "VM.md").exists() else None)
+    elif args.doc and args.doc.suffix in (".yaml", ".yml"):
+        config_path = args.doc
+        runbook_path = config_path.parent / "VM.md" if (config_path.parent / "VM.md").exists() else None
+    elif args.doc and args.doc.suffix == ".md":
+        runbook_path = args.doc
+        yaml_cand = runbook_path.parent / "vm.yaml"
+        config_path = yaml_cand if yaml_cand.exists() else runbook_path
+    else:
+        config_path, runbook_path = find_default_config(args.vm)
+
+    if not config_path or not config_path.exists():
+        print("============================================================")
+        print(" DevBox VM Deployment Engine")
+        print("============================================================")
+        print("[!] Pre-requisite Gate 1 FAILED: No VM specification found in inventory/.\n\n"
+              "Remediation:\n"
+              "  Run devbox_inventory to discover and document the hypervisor and VMs:\n"
+              "    python3 .agents/skills/devbox_inventory/scripts/add_vmhost.py <vmhost>\n"
+              "  Or specify an existing configuration via --config <path> or --vm <vm_name>.")
+        sys.exit(1)
 
     print("============================================================")
     print(" DevBox VM Deployment Engine")
-    print(f" Runbook: {args.doc}")
+    print(f" SSOT Config: {config_path.relative_to(REPO_ROOT) if config_path.is_relative_to(REPO_ROOT) else config_path}")
+    if runbook_path and runbook_path.exists():
+        print(f" Runbook:     {runbook_path.relative_to(REPO_ROOT) if runbook_path.is_relative_to(REPO_ROOT) else runbook_path} (Supplementary)")
     print("============================================================")
 
     # --------------------------------------------------------------------------
-    # MANDATORY GATE 1 & 2: docs/VM.md & verify_config.py
+    # MANDATORY GATE 1 & 2: SSOT validation & verify_config.py
     # --------------------------------------------------------------------------
-    prereq_ok, prereq_msg = check_prerequisites(doc_path=args.doc, verify_script=VERIFY_SCRIPT)
+    prereq_ok, prereq_msg = check_prerequisites(config_path=config_path, runbook_path=runbook_path, verify_script=VERIFY_SCRIPT)
     print(prereq_msg)
     if not prereq_ok:
         sys.exit(1)
 
-    # Parse parameters from verified runbook
-    params = parse_runbook(args.doc)
+    # Parse parameters from verified SSOT specification
+    params = load_vm_config(config_path)
     vm_name = params["VM_NAME"]
     host = params["HYPERVISOR_HOST"]
 

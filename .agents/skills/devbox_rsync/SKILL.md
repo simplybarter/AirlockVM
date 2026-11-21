@@ -29,7 +29,7 @@ The generated script ensures that **ONLY code needed to run the application on t
 ## How It Works
 
 1. **VM Target Discovery**:
-   * Inspects `docs/VM.md` or repository defaults to identify the target VM domain name (e.g. `devbox-vm`) and destination directory (e.g. `~/DevBox/`).
+   * Inspects `inventory/{vmhost}/{vm}/VM.md` or repository defaults to identify the target VM domain name (e.g. `devbox-vm`) and destination directory (e.g. `~/DevBox/`).
 2. **Intelligent Stack Evaluation**:
    * Analyzes project manifests (`requirements.txt`, `package.json`, `Cargo.toml`, `go.mod`, `Dockerfile`).
    * Determines files that must **never** be copied to the VM (such as `.git/`, `.agents/`, local `node_modules/`, `venv/`, `.env*.local`, and documentation).

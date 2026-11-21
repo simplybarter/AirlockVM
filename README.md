@@ -23,9 +23,9 @@ By strictly separating software engineering workstations from runtime execution 
 * **Proportional Resource Allocation**: Automatically discovers physical host CPU threads and total RAM, dynamically sizing guest vCPUs (e.g. 50% capacity) and memory (e.g. 25% capacity) to prevent host starvation.
 * **Conflict-Free Network Discovery**: Queries libvirt networks (such as `default` / `virbr0`), inspects active DHCP leases, allocates the next unassigned static IP, and generates unique collision-free MAC addresses (`52:54:00:xx:xx:xx`).
 * **Automated Project-to-VM Naming**: Derives the project name from the repository root folder, auto-generating domain names (`<project>-vm`), service units, and user accounts.
-* **Automated Virtual Machine Deployment (`devbox_deploy`)**: Launches the execution VM from `docs/VM.md` with strict pre-requisite verification gates (validates runbook existence and `verify_config.py` health), automated cloud-init image seeding, static DHCP reservations, and systemd socket forwarding.
+* **Automated Virtual Machine Deployment (`devbox_deploy`)**: Launches the execution VM using `inventory/{vmhost}/{vm}/vm.yaml` as the Single Source of Truth (SSOT) with strict pre-requisite verification gates, automated cloud-init image seeding, static DHCP reservations, and systemd socket forwarding.
 * **Intelligent Code Synchronization (`devbox_rsync`)**: Evaluates project manifests (Python, Node.js, Rust, Go) and generates an optimized, git-ignored `sync_to_devbox.sh` script to sync ONLY application code to the VM while ignoring local caches and agent files.
-* **Antigravity AI Agent Skills**: Includes ready-to-use `.agents/skills/devbox_configure`, `.agents/skills/devbox_deploy`, and `.agents/skills/devbox_rsync` skills for autonomous agent-driven VM customization, provisioning, and workspace sync.
+* **Antigravity AI Agent Skills**: Includes ready-to-use `.agents/skills/devbox_inventory`, `.agents/skills/devbox_configure`, `.agents/skills/devbox_deploy`, and `.agents/skills/devbox_rsync` skills for autonomous agent-driven hypervisor discovery, VM customization, provisioning, and workspace sync.
 
 ---
 
@@ -70,9 +70,8 @@ By strictly separating software engineering workstations from runtime execution 
 │       └── {vm}/                            # Virtual machine directory
 │           ├── vm.yaml                      # Documented VM record + blueprint
 │           └── VM.md                        # Rendered VM operational runbook
-├── docs/                                    # Generated runbooks (git-ignored)
-│   ├── ARCHITECTURE.md                      # Security model and isolation topology
-│   └── VM.md                                # Generated VM execution runbook
+├── docs/                                    # Project architecture and security model
+│   └── ARCHITECTURE.md                      # Security model and isolation topology
 ├── .agents/skills/
 │   ├── devbox_inventory/
 │   │   ├── SKILL.md                         # Inventory discovery & management skill
@@ -158,7 +157,7 @@ python3 .agents/skills/devbox_configure/scripts/configure_vm.py --probe my-hyper
 
 ### 3. Preview Changes (Dry-Run Mode)
 
-To inspect differences before modifying `docs/VM.md`:
+To inspect differences before modifying inventory runbooks:
 
 ```bash
 python3 .agents/skills/devbox_configure/scripts/configure_vm.py --probe localhost --dry-run
@@ -194,7 +193,7 @@ python3 .agents/skills/devbox_configure/scripts/verify_config.py
 
 ### 7. Deploy the Execution Virtual Machine
 
-Launch the virtual machine defined in `docs/VM.md` with pre-requisite enforcement:
+Launch the virtual machine defined in `inventory/{vmhost}/{vm}/vm.yaml` (SSOT) with pre-requisite enforcement:
 
 ```bash
 # Preview deployment plan (dry-run):

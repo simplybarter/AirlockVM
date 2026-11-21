@@ -77,7 +77,7 @@ DevBox takes care of all setup friction automatically across a cohesive 4-skill 
 
 1. **Discovers Hypervisor & VMs**: Scans local or remote KVM hosts, documenting hardware, storage pools, networks, and existing VMs into structured YAML records (`devbox_inventory`).
 2. **Detects Capabilities & Sizes Headroom**: Ensures `/dev/kvm` and `virbr0` are available, calculating proportional vCPU and RAM allocations so your workstation never freezes (`devbox_configure`).
-3. **Generates the Exact Runbook**: Creates your step-by-step operational specification ([`docs/VM.md`](docs/VM.md)) with zero leftover placeholders.
+3. **Generates the Exact Runbook**: Creates your step-by-step operational specification (`inventory/{vmhost}/{vm}/VM.md`) with zero leftover placeholders.
 4. **Automated VM Provisioning & Inventory Sync**: Provisions domain, cloud-init seed, static DHCP, and socket proxying, auto-registering the VM in inventory (`devbox_deploy`).
 5. **Intelligent Code Synchronization**: Excludes heavy local caches and copies only application files (`devbox_rsync`).
 

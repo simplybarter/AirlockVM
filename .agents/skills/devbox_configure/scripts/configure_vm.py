@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 DevBox VM Configuration Script
-Facilitates customizing docs/VM.md from a parameterized template.
+Facilitates customizing inventory VM runbooks (inventory/<vmhost>/<vm>/VM.md) from a parameterized template.
 """
 
 import argparse
@@ -53,7 +53,6 @@ def find_repo_root() -> Path:
 
 REPO_ROOT = find_repo_root()
 DEFAULT_PROJECT_NAME = REPO_ROOT.name
-DEFAULT_OUTPUT_PATH = REPO_ROOT / "docs" / "VM.md"
 
 PARAM_DESCRIPTIONS = {
     "PROJECT_NAME": "Project Display Name (e.g. MyProject)",
@@ -386,8 +385,8 @@ def main():
         "--output",
         "-o",
         type=Path,
-        default=DEFAULT_OUTPUT_PATH,
-        help=f"Path to destination markdown file (default: {DEFAULT_OUTPUT_PATH})",
+        default=None,
+        help="Path to destination markdown file (default: inventory/<vmhost>/<vm>/VM.md)",
     )
     parser.add_argument(
         "--set",
@@ -491,30 +490,37 @@ def main():
             json.dump(params, f, indent=2)
         print(f"Configuration saved to {args.save_config}")
 
-    # 7. Dry run or write output
+    # 7. Determine output path and write/dry-run
+    output_path = args.output
+    if not output_path:
+        target_host = args.from_inventory or (args.probe if args.probe and args.probe not in ("localhost", "127.0.0.1") else "localhost") or params.get("HYPERVISOR_HOST") or "localhost"
+        vm_name = params.get("VM_NAME") or f"{DEFAULT_PROJECT_NAME.lower()}-vm"
+        output_path = REPO_ROOT / "inventory" / target_host / vm_name / "VM.md"
+
     original_content = ""
-    if args.output.exists():
-        with open(args.output, "r", encoding="utf-8") as f:
+    if output_path.exists():
+        with open(output_path, "r", encoding="utf-8") as f:
             original_content = f.read()
 
     if args.dry_run:
-        print(f"\n--- Dry Run: Diff for {args.output} ---")
-        show_diff(original_content, rendered, str(args.output) + " (original)", str(args.output) + " (rendered)")
+        print(f"\n--- Dry Run: Diff for {output_path} ---")
+        show_diff(original_content, rendered, str(output_path) + " (original)", str(output_path) + " (rendered)")
         return
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with open(args.output, "w", encoding="utf-8") as f:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(rendered)
 
-    print(f"Successfully generated {args.output}")
+    print(f"Successfully generated {output_path}")
 
     # Also update VM runbook in inventory if targeted from inventory
     if args.from_inventory and params.get("VM_NAME"):
         vm_inv_dir = REPO_ROOT / "inventory" / args.from_inventory / params["VM_NAME"]
         if vm_inv_dir.exists():
             vm_runbook_path = vm_inv_dir / "VM.md"
-            vm_runbook_path.write_text(rendered, encoding="utf-8")
-            print(f"Updated inventory VM runbook: {vm_runbook_path.relative_to(REPO_ROOT)}")
+            if vm_runbook_path != output_path:
+                vm_runbook_path.write_text(rendered, encoding="utf-8")
+                print(f"Updated inventory VM runbook: {vm_runbook_path.relative_to(REPO_ROOT)}")
     if original_content and original_content != rendered:
         print("Updated document with customized preferences.")
     elif not original_content:

@@ -32,7 +32,7 @@ python3 .agents/skills/devbox_configure/scripts/verify_config.py
 
 ### What `verify_config.py` Validates:
 * Confirms that all unique `{{ PLACEHOLDER }}` tokens in `template/VM.md.template` are accounted for in `devbox_inventory` templates.
-* Scans `docs/VM.md` to ensure zero leftover or unrendered template tags remain.
+* Audits rendered `VM.md` files in `inventory/` to ensure zero leftover or unrendered template tags remain.
 
 ---
 
