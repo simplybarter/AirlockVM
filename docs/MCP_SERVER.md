@@ -71,22 +71,33 @@ The MCP server exposes standard, declarative tools enabling agents to inspect, d
 | :--- | :--- | :--- |
 | `devbox_list` | *(none)* | Discovers and lists all registered hypervisors and VMs in the `inventory/` Single Source of Truth (SSOT), including their allocated IPs, mapped repositories, and external forwarding ports. |
 | `devbox_status` | `vm_name: str` | Queries the target VM's live status (`running`, `shut off`, etc.), current IP lease, uptime, and available disk snapshots. |
+| `devbox_detect_app` | `local_path: str` | Intelligently inspects project manifests (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `compose.yaml`) to infer framework, internal port, and `post_deploy` command. |
+| `devbox_health_check` | `vm_name: str`<br/>`app_name: str = ""` <br/>`path: str = "/"` | Probes the live hypervisor route with retries. If failing or crashing, automatically connects to the VM over SSH and captures runtime logs for instant diagnosis. |
 | `devbox_ping` | *(none)* | Health check verifying that the MCP server and Python 3.14 runtime are responsive. |
 
-### 3.2. Lifecycle & Power Management
+### 3.2. Sizing, Placement & Network Automation
+
+| Tool Name | Parameters | Description |
+| :--- | :--- | :--- |
+| `devbox_find_port` | `vm_name: str`<br/>`internal_port: int = 3000`<br/>`preferred_port: int = 0` | Audits both inventory reservations and live hypervisor TCP listening sockets over SSH to discover and return the next clean, conflict-free external proxy port. |
+| `devbox_alloc_network` | `vmhost: str`<br/>`network_name: str = "default"` | Audits libvirt network definitions and reservations, allocating the next available static IP and generating a collision-free MAC address (`52:54:00:xx:xx:xx`). |
+| `devbox_select_host` | `required_vcpu: int = 2`<br/>`required_ram_mib: int = 2048`<br/>`required_disk_gb: int = 20` | Audits CPU, available RAM headroom, and running VMs across registered hypervisors to select the optimal host for placement. |
+
+### 3.3. Lifecycle, Safety & Power Management
 
 | Tool Name | Parameters | Description |
 | :--- | :--- | :--- |
 | `devbox_power` | `vm_name: str`<br/>`action: "start" \| "stop" \| "reboot"` | Issues power state transitions via libvirt (`virsh start`, `virsh shutdown`, `virsh reboot`). |
+| `devbox_checkpoint` | `vm_name: str`<br/>`action: "create" \| "revert"`<br/>`snapshot_name: str = ""` | Creates automated pre-deployment disk snapshot checkpoints or reverts back to a clean state if experimental workloads crash. |
 | `devbox_snapshot` | `vm_name: str`<br/>`action: "create" \| "revert" \| "list"`<br/>`snapshot_name: str = ""` | Manages disk-only snapshots (`virsh snapshot-create-as` / `virsh snapshot-revert`), enabling rapid clean-state rollbacks after running experimental workloads. |
 
-### 3.3. Provisioning & Workload Deployment
+### 3.4. Provisioning & Workload Deployment
 
 | Tool Name | Parameters | Description |
 | :--- | :--- | :--- |
-| `devbox_attach_app` | `vm_name: str`<br/>`app_name: str`<br/>`local_path: str`<br/>`internal_port: int`<br/>`external_port: int`<br/>`post_deploy: str = ""` | Registers or updates an application repository in `inventory/{vmhost}/{vm}/vm.yaml` under `repositories:`, defining internal/external port mappings, remote target paths, and `post_deploy` lifecycle hooks. |
+| `devbox_attach_app` | `vm_name: str`<br/>`local_path: str`<br/>`app_name: str = ""` <br/>`internal_port: int = 0`<br/>`external_port: int = 0`<br/>`post_deploy: str = ""` | Registers or updates an application repository in `inventory/{vmhost}/{vm}/vm.yaml`. Auto-detects stack/ports/commands if omitted, and auto-allocates conflict-free host ports. |
 | `devbox_deploy_vm` | `vm_name: str`<br/>`dry_run: bool = False` | Enforces pre-flight capability checks and provisions/updates the VM domain: SSH key generation, static DHCP reservations on `virbr0`, cloud-init NoCloud ISO seeding, `virt-install`, and hypervisor `systemd-socket-proxyd` forwarders for all mapped repository ports. |
-| `devbox_deploy_app` | `vm_name: str`<br/>`app_name: str = ""` <br/>`dry_run: bool = False`<br/>`no_restart: bool = False`<br/>`offline: bool = False` | Synchronizes application source code to the target VM using `deploy_app_to_vm.sh`, automatically injecting `HOST=0.0.0.0` and `PORT=$internal_port` into post-deploy lifecycle hooks while excluding version control and local caches. |
+| `devbox_deploy_app` | `vm_name: str`<br/>`app_name: str = ""` <br/>`dry_run: bool = False`<br/>`no_restart: bool = False`<br/>`offline: bool = False`<br/>`checkpoint: bool = False`<br/>`verify_health: bool = False` | Synchronizes application source code to the target VM using `deploy_app_to_vm.sh`. Optionally creates safety snapshot checkpoints and verifies HTTP route health post-deploy. |
 
 ---
 
