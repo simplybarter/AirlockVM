@@ -127,7 +127,7 @@ AirlockVM includes a unified client connector script (`connect_airlock.sh`) to o
 
 ## 6. Code & Testing Standards
 
-* **Virtual Environment**: All development, testing, and tool execution must use the dedicated Python 3.14 virtual environment in `.venv`:
+* **Virtual Environment**: All development, testing, and tool execution must use the dedicated Python virtual environment (`>=3.11`) in `.venv`:
   ```bash
   .venv/bin/python -m unittest tests/test_integration_permutations.py
   ```

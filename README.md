@@ -1,7 +1,8 @@
 # AirlockVM
 
+[![CI](https://github.com/simplybarter/AirlockVM/actions/workflows/ci.yml/badge.svg)](https://github.com/simplybarter/AirlockVM/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python 3.14+](https://img.shields.io/badge/Python-3.14%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![Linux KVM](https://img.shields.io/badge/Virtualization-Linux%20KVM-orange.svg?logo=linux&logoColor=white)](https://www.linux-kvm.org/)
 [![libvirt](https://img.shields.io/badge/Hypervisor-libvirt%20%2F%20QEMU-red.svg?logo=qemu&logoColor=white)](https://libvirt.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -131,7 +132,7 @@ For manual MCP integration or agent harnesses, configure `.gemini/mcp_config.jso
 
 ### Prerequisites
 
-* Python 3.14 or higher.
+* Python 3.11 or higher.
 * Linux host with KVM/QEMU and `libvirtd` (either running locally or accessible over SSH).
 
 ### Installation
@@ -152,7 +153,7 @@ Installs `airlock` and `airlock-mcp` into an isolated user tool environment via 
 
 #### Option 2: Local Repository Virtual Environment
 ```bash
-python3.14 -m venv .venv
+python3 -m venv .venv
 .venv/bin/pip install -e .
 ```
 

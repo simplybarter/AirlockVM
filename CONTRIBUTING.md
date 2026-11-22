@@ -13,9 +13,9 @@ Thank you for your interest in contributing to AirlockVM. We welcome improvement
    ```
 
 2. **Setup Python Virtual Environment**:
-   Ensure you are using Python 3.14 or higher, initialize the project virtual environment, and install in editable mode:
+   Ensure you are using Python 3.11 or higher, initialize the project virtual environment, and install in editable mode:
    ```bash
-   python3.14 -m venv .venv
+   python3 -m venv .venv
    source .venv/bin/activate
    pip install -e .
    ```

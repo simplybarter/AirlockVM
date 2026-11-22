@@ -24,7 +24,7 @@ flowchart TD
     end
 
     subgraph AirlockVMControlPlane["AirlockVM Control Plane (Standalone)"]
-        MCP["AirlockVM MCP Server<br/>(airlock-mcp stdio / Python 3.14)"]
+        MCP["AirlockVM MCP Server<br/>(airlock-mcp stdio / Python 3.11+)"]
         SSOT["Inventory SSOT<br/>(~/.airlock/inventory/{vmhost}/{vm}/vm.yaml)"]
         Core["Core Engine<br/>(deploy_vm.py / deploy_app_to_airlock.sh)"]
     end
@@ -53,7 +53,7 @@ flowchart TD
 
 The AirlockVM MCP Server runs in an isolated Python virtual environment configured via modern PEP 621 packaging:
 
-* **Python Runtime**: Python 3.14 (`>=3.14`)
+* **Python Runtime**: Python 3.11+ (`>=3.11`)
 * **Packaging Specification**: [pyproject.toml](../pyproject.toml) managed with `hatchling`
 * **MCP SDK**: `mcp>=2.3.0` (`mcp.server.mcpserver.MCPServer`)
 * **Transport**: Standard I/O (`stdio`), enabling zero-network local agent execution with immediate lifecycle termination when the agent disconnects.
@@ -79,7 +79,7 @@ The MCP server exposes standard, declarative tools enabling agents to inspect, d
 | `airlock_reconcile` | `vm_name: str`<br/>`strategy: str = "refresh_inventory"` | Reconciles detected drift between inventory SSOT and live hypervisor. |
 | `airlock_profile_workload` | `vm_name: str`<br/>`duration_sec: int = 2` | Measures real-time CPU, RAM, swap, and process load inside a running VM and computes rightsizing guidance to reclaim hypervisor resources. |
 | `airlock_audit_security` | `vm_name: str`<br/>`app_name: str = ""` | Audits isolation boundaries: verifies zero secret/key leaks on guest VM, checks AppArmor confinement, and confirms zero workload processes on workstation. |
-| `airlock_ping` | *(none)* | Health check verifying that the MCP server and Python 3.14 runtime are responsive. |
+| `airlock_ping` | *(none)* | Health check verifying that the MCP server and Python runtime are responsive. |
 
 ### 3.2. Sizing, Placement & Network Automation
 
