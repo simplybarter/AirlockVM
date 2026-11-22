@@ -14,7 +14,9 @@ import sys
 from airlock.mcp.server import (
     airlock_audit_drift,
     airlock_audit_security,
+    airlock_bake_image,
     airlock_diagnose,
+    airlock_exec,
     airlock_list,
     airlock_ping,
     airlock_preflight,
@@ -206,6 +208,39 @@ def cmd_audit_security(args: argparse.Namespace) -> int:
     return 0 if res.get("compliant") else 1
 
 
+def cmd_exec(args: argparse.Namespace) -> int:
+    raw_cmd = args.cmd
+    if raw_cmd and raw_cmd[0] == "--":
+        raw_cmd = raw_cmd[1:]
+    command_str = " ".join(raw_cmd).strip()
+    if not command_str:
+        print("Error: Command is required (e.g. 'airlock exec <vm_name> -- pytest').", file=sys.stderr)
+        return 1
+    res = airlock_exec(
+        vm_name=args.vm_name,
+        command=command_str,
+        workdir=args.workdir or "",
+        timeout=args.timeout,
+    )
+    if res.get("error"):
+        print(f"Error: {res['error']}", file=sys.stderr)
+        return 1
+    if res.get("stdout"):
+        print(res["stdout"])
+    if res.get("stderr"):
+        print(res["stderr"], file=sys.stderr)
+    return int(res.get("returncode", 1))
+
+
+def cmd_bake_image(args: argparse.Namespace) -> int:
+    res = airlock_bake_image(vmhost=args.host, force=args.force, dry_run=args.dry_run)
+    if res.get("stdout"):
+        print(res["stdout"])
+    if res.get("stderr"):
+        print(res["stderr"], file=sys.stderr)
+    return 0 if res.get("success") else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="airlock",
@@ -270,6 +305,19 @@ def main(argv: list[str] | None = None) -> int:
     p_sec.add_argument("vm_name", help="Domain name of target VM")
     p_sec.add_argument("--app-name", help="Optional application display name")
 
+    # exec
+    p_exec = subparsers.add_parser("exec", help="Execute a shell command inside an isolated guest VM")
+    p_exec.add_argument("vm_name", help="Domain name of target VM")
+    p_exec.add_argument("--workdir", "-w", help="Working directory inside the guest VM")
+    p_exec.add_argument("--timeout", "-t", type=int, default=120, help="Command timeout in seconds (default: 120)")
+    p_exec.add_argument("cmd", nargs=argparse.REMAINDER, help="Command to run (prefix with '--')")
+
+    # bake-image
+    p_bake = subparsers.add_parser("bake-image", help="Pre-bake a golden Ubuntu 24.04 qcow2 base image on a hypervisor")
+    p_bake.add_argument("host", nargs="?", default="localhost", help="Hypervisor host (default: localhost)")
+    p_bake.add_argument("--force", action="store_true", help="Overwrite existing golden base image")
+    p_bake.add_argument("--dry-run", action="store_true", help="Preview golden image baking plan")
+
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
@@ -288,6 +336,8 @@ def main(argv: list[str] | None = None) -> int:
         "drift": cmd_drift,
         "snapshot": cmd_snapshot,
         "audit-security": cmd_audit_security,
+        "exec": cmd_exec,
+        "bake-image": cmd_bake_image,
     }
 
     handler = commands.get(args.command)

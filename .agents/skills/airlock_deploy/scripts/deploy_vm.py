@@ -357,6 +357,119 @@ def resolve_storage_dir(host: str) -> str:
     return "/var/lib/libvirt/images"
 
 
+GOLDEN_IMAGE_FILENAME = "airlock-golden-ubuntu-24.04.qcow2"
+GOLDEN_PACKAGES = [
+    "docker.io",
+    "containerd",
+    "docker-compose-v2",
+    "qemu-guest-agent",
+    "python3",
+    "python3-venv",
+    "python3-pip",
+    "nodejs",
+    "npm",
+    "git",
+    "curl",
+    "wget",
+    "jq",
+    "tmux",
+    "htop",
+    "ca-certificates",
+    "rsync",
+]
+
+
+def resolve_base_image_info(
+    host: str,
+    target_dir: str,
+    dry_run: bool = False,
+    prefer_golden: bool = True,
+) -> tuple[str, bool]:
+    """Resolves the optimal backing image, preferring a pre-baked golden image when present.
+
+    Returns:
+        tuple[str, bool]: (image_path, is_golden)
+    """
+    if prefer_golden:
+        golden_candidates = [
+            f"{target_dir}/{GOLDEN_IMAGE_FILENAME}",
+            f"/var/lib/libvirt/images/{GOLDEN_IMAGE_FILENAME}",
+        ]
+        for g_cand in golden_candidates:
+            ret, _, _ = run_cmd_status(["test", "-f", g_cand], host=host)
+            if ret == 0:
+                print(f"    [✓] Using pre-baked golden image on {host}: {g_cand} (fast-boot enabled)")
+                return g_cand, True
+
+    return resolve_base_cloud_image(host, target_dir, dry_run=dry_run), False
+
+
+def bake_golden_image(
+    host: str,
+    target_dir: str | None = None,
+    dry_run: bool = False,
+    force: bool = False,
+) -> int:
+    """Pre-bakes a golden Ubuntu 24.04 qcow2 base image with Docker, Node.js, and Python."""
+    storage_dir = target_dir or resolve_storage_dir(host)
+    golden_path = f"{storage_dir}/{GOLDEN_IMAGE_FILENAME}"
+    tmp_path = f"{storage_dir}/.{GOLDEN_IMAGE_FILENAME}.tmp"
+
+    print("============================================================")
+    print(f" AirlockVM Golden Base Image Baker ({host})")
+    print(f" Target Image: {golden_path}")
+    print("============================================================")
+
+    if not force:
+        ret_exists, _, _ = run_cmd_status(["test", "-f", golden_path], host=host)
+        if ret_exists == 0:
+            print(f"[✓] Golden image already exists on {host}: {golden_path}")
+            print("    Use --force to rebuild it from scratch.")
+            return 0
+
+    ret_vc, _, _ = run_cmd_status(["which", "virt-customize"], host=host)
+    if ret_vc != 0 and not dry_run:
+        print(f"[-] Error: 'virt-customize' is not installed on hypervisor '{host}'.", file=sys.stderr)
+        print("    Install it with: sudo apt update && sudo apt install -y libguestfs-tools", file=sys.stderr)
+        return 1
+
+    base_img = resolve_base_cloud_image(host, storage_dir, dry_run=dry_run)
+    pkg_csv = ",".join(GOLDEN_PACKAGES)
+
+    bake_script = (
+        f"set -euo pipefail; "
+        f"sudo rm -f {shlex.quote(tmp_path)}; "
+        f"sudo cp {shlex.quote(base_img)} {shlex.quote(tmp_path)}; "
+        f"sudo virt-customize -a {shlex.quote(tmp_path)} "
+        f"--update "
+        f"--install {shlex.quote(pkg_csv)} "
+        f"--run-command 'systemctl enable docker qemu-guest-agent' "
+        f"--run-command 'cloud-init clean --logs || true' "
+        f"--truncate /etc/machine-id; "
+        f"sudo chown libvirt-qemu:kvm {shlex.quote(tmp_path)} || true; "
+        f"sudo chmod 644 {shlex.quote(tmp_path)} || true; "
+        f"sudo mv {shlex.quote(tmp_path)} {shlex.quote(golden_path)}"
+    )
+
+    if dry_run:
+        print(f"    [PLAN] Base Cloud Image: {base_img}")
+        print(f"    [PLAN] Packages ({len(GOLDEN_PACKAGES)}): {pkg_csv}")
+        print(f"    [PLAN] Run virt-customize on temporary copy and publish atomically to {golden_path}")
+        print("[✓] Dry-run complete. Re-run without --dry-run to bake golden image.")
+        return 0
+
+    print(f"[*] Baking golden image on {host} (pre-installing {len(GOLDEN_PACKAGES)} packages)...")
+    ret, out, err = run_cmd_status(["bash", "-c", bake_script], host=host)
+    if ret != 0:
+        print(f"[-] Golden image baking failed: {err or out}", file=sys.stderr)
+        run_cmd_status(["sudo", "rm", "-f", tmp_path], host=host)
+        return 1
+
+    print(f"[✓] Golden image successfully baked on {host}: {golden_path}")
+    print("    New VMs on this hypervisor will now clone from this golden image and skip package installation.")
+    return 0
+
+
 def resolve_base_cloud_image(host: str, target_dir: str, dry_run: bool = False) -> str:
     """Finds existing Noble cloud image or downloads it to the hypervisor."""
     candidates = [
@@ -421,7 +534,14 @@ def ensure_static_dhcp(params: dict, host: str, dry_run: bool = False) -> None:
             print(f"    [✓] Static DHCP reservation registered successfully.")
 
 
-def generate_cloud_init_seed(params: dict, pub_key: str, seed_iso_path: str, host: str, dry_run: bool = False) -> None:
+def generate_cloud_init_seed(
+    params: dict,
+    pub_key: str,
+    seed_iso_path: str,
+    host: str,
+    dry_run: bool = False,
+    is_golden: bool = False,
+) -> None:
     """Creates cloud-init user-data, meta-data, and builds the NoCloud seed ISO."""
     meta_data = f"""instance-id: {params['VM_NAME']}
 local-hostname: {params['VM_NAME']}
@@ -439,6 +559,11 @@ local-hostname: {params['VM_NAME']}
       - {pub_key}
 """
 
+    packages_block = ""
+    if not is_golden:
+        pkg_lines = "\n".join(f"  - {pkg}" for pkg in GOLDEN_PACKAGES)
+        packages_block = f"\npackages:\n{pkg_lines}\n"
+
     user_data = f"""#cloud-config
 hostname: {params['VM_NAME']}
 users:
@@ -449,26 +574,7 @@ users:
     groups: [sudo, docker]
     ssh_authorized_keys:
       - {pub_key}
-{secondary_block}
-packages:
-  - docker.io
-  - containerd
-  - docker-compose-v2
-  - qemu-guest-agent
-  - python3
-  - python3-venv
-  - python3-pip
-  - nodejs
-  - npm
-  - git
-  - curl
-  - wget
-  - jq
-  - tmux
-  - htop
-  - ca-certificates
-  - rsync
-
+{secondary_block}{packages_block}
 runcmd:
   - systemctl enable --now docker
   - systemctl enable --now qemu-guest-agent
@@ -1000,7 +1106,15 @@ def main():
     parser.add_argument("--config", type=Path, default=None, help="Path to VM specification YAML (default: auto-detected from inventory)")
     parser.add_argument("--doc", type=Path, default=None, help="Path to supplementary runbook markdown or custom specification")
     parser.add_argument("--boot-timeout", type=int, default=240, help="Seconds to wait for guest SSH readiness after provisioning (default: 240)")
+    parser.add_argument("--bake-golden", action="store_true", help="Pre-bake a golden Ubuntu 24.04 qcow2 base image on the hypervisor")
+    parser.add_argument("--host", type=str, default="localhost", help="Target hypervisor host for --bake-golden (default: localhost)")
+    parser.add_argument("--force", action="store_true", help="Force overwrite when used with --bake-golden")
+    parser.add_argument("--no-golden", action="store_true", help="Ignore pre-baked golden image and deploy from raw Ubuntu cloud image")
     args = parser.parse_args()
+
+    # Handle standalone --bake-golden before requiring a vm.yaml
+    if args.bake_golden:
+        sys.exit(bake_golden_image(host=args.host, dry_run=args.dry_run, force=args.force))
 
     if args.config:
         config_path = args.config
@@ -1136,7 +1250,12 @@ def main():
 
     # Step 3: Hypervisor Storage & Base Image Preparation
     target_storage = resolve_storage_dir(host)
-    base_image = resolve_base_cloud_image(host, target_storage, dry_run=args.dry_run)
+    base_image, is_golden = resolve_base_image_info(
+        host,
+        target_storage,
+        dry_run=args.dry_run,
+        prefer_golden=not args.no_golden,
+    )
 
     disk_path = f"{target_storage}/{vm_name}.qcow2"
     seed_iso_path = f"{target_storage}/{vm_name}-seed.iso"
@@ -1152,7 +1271,7 @@ def main():
         print(f"    [✓] QCOW2 disk created backed by {base_image}")
 
     # Step 4: Cloud-Init NoCloud Seed Generation
-    generate_cloud_init_seed(params, pub_key, seed_iso_path, host, dry_run=args.dry_run)
+    generate_cloud_init_seed(params, pub_key, seed_iso_path, host, dry_run=args.dry_run, is_golden=is_golden)
 
     # Step 5: Provision Domain with virt-install
     provision_domain(params, disk_path, seed_iso_path, host, dry_run=args.dry_run)

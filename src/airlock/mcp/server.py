@@ -21,6 +21,7 @@ from mcp.server.mcpserver import MCPServer
 from airlock.detector import detect_application
 from airlock.diagnostics import diagnose_workload_failure
 from airlock.drift import audit_vm_drift, reconcile_vm_drift
+from airlock.executor import exec_in_vm
 from airlock.health import verify_route_health
 from airlock.inventory import (
     find_vm_yaml,
@@ -865,6 +866,51 @@ def airlock_snapshot(vm_name: str, action: str, snapshot_name: str = "") -> dict
     res = _run_command(cmd, timeout=60)
     res["vm_name"] = vm_name
     res["action"] = action
+    return res
+
+
+@server.tool()
+def airlock_exec(
+    vm_name: str,
+    command: str,
+    workdir: str = "",
+    timeout: int = 120,
+) -> dict[str, Any]:
+    """Executes a build, test, or diagnostic shell command inside an isolated guest VM.
+
+    Args:
+        vm_name: Target VM domain name in inventory.
+        command: Shell command to run inside the guest (e.g. 'pytest', 'npm test', 'docker ps').
+        workdir: Optional working directory inside the guest (defaults to blueprint remote_code_dir).
+        timeout: Maximum execution time in seconds (1..600, default 120).
+    """
+    return exec_in_vm(vm_name=vm_name, command=command, workdir=workdir, timeout=timeout)
+
+
+@server.tool()
+def airlock_bake_image(
+    vmhost: str = "localhost",
+    force: bool = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Pre-bakes a golden Ubuntu 24.04 qcow2 base image with Docker, Node.js, and Python on a hypervisor.
+
+    New VMs cloned from the golden image skip cloud-init package downloads and boot to SSH in seconds.
+
+    Args:
+        vmhost: Target hypervisor host ('localhost' or remote SSH alias).
+        force: Overwrite an existing golden image if already present.
+        dry_run: Preview the image baking plan without modifying hypervisor storage.
+    """
+    cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--bake-golden", "--host", vmhost]
+    if force:
+        cmd.append("--force")
+    if dry_run:
+        cmd.append("--dry-run")
+
+    res = _run_command(cmd, timeout=600)
+    res["host"] = vmhost
+    res["dry_run"] = dry_run
     return res
 
 
