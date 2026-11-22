@@ -138,7 +138,7 @@ AirlockVM supports two deployment models established via conversation between th
 
 ## 5. Permutation Test Matrix & Verification Results
 
-All 34 test permutations across 9 dimensions are executed in `.venv/bin/python -m unittest tests/test_integration_permutations.py -v`:
+All 39 test permutations across 10 dimensions are executed in `.venv/bin/python -m unittest tests/test_integration_permutations.py -v`:
 
 | Dimension | Permutation / Test Case | Tool / Engine | Result | Details |
 | :--- | :--- | :--- | :---: | :--- |
@@ -173,7 +173,12 @@ All 34 test permutations across 9 dimensions are executed in `.venv/bin/python -
 | **H. Client Connector CLI** | Registration Inspection | `./connect_airlock.sh --list` | **PASS** | Audits global and project configurations |
 | | Multi-IDE Dry-Run Registration | `./connect_airlock.sh --all` | **PASS** | Evaluates Antigravity, VSCode, Cursor, etc. |
 | | Single-Platform Target Reg | `./connect_airlock.sh --cursor` | **PASS** | Targets selected client IDE |
+| | Confirmation Abort Rejection | `./connect_airlock.sh` (input: `n`) | **PASS** | Clean exit without writing to disk |
+| | Non-Interactive Auto-Approve | `./connect_airlock.sh -y` | **PASS** | Applies configuration without interactive prompt |
+| | Current Directory Default | `./connect_airlock.sh` (no `--target`) | **PASS** | Automatically targets current project workspace |
 | **I. Live Deploy & Proxy** | Hypervisor Proxy Reachability | `curl http://remotehost:3002/` | **PASS** | **HTTP 200 OK**, payload `{status: "ok", port: 3000}` |
 | | Live MCP Route Health Check | `airlock_health_check` | **PASS** | Confirms `healthy: true` via proxy forwarder |
 | | Live Workload Profiler | `airlock_profile_workload`| **PASS** | Real-time CPU, RAM, and `node server.js` profiling |
 | | Live Domain Status Check | `airlock_status` | **PASS** | Confirms domain `running` on hypervisor |
+| **J. Hierarchical Inventory** | Environment Override Discovery | `$AIRLOCK_INVENTORY_DIR` | **PASS** | Resolves custom inventory path with top priority |
+| | User & Repo Fallback | `~/.airlock/inventory/` / `inventory/` | **PASS** | Discovers persistent user state & repo test fallback |
