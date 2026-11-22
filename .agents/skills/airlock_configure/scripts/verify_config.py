@@ -106,7 +106,7 @@ def check_rendered_doc(doc_path: Path) -> bool:
 
 
 def check_all_inventory_runbooks(repo_root: Path) -> bool:
-    inv_dir = repo_root / "inventory"
+    inv_dir = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
     if not inv_dir.exists():
         print("NOTICE: No inventory directory found to audit.")
         return True

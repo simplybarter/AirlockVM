@@ -70,7 +70,7 @@ The MCP server exposes standard, declarative tools enabling agents to inspect, d
 
 | Tool Name | Parameters | Description |
 | :--- | :--- | :--- |
-| `airlock_list` | *(none)* | Discovers and lists all registered hypervisors and VMs across active inventory search paths (`~/.airlock/inventory/` or repo `inventory/`), including their allocated IPs, mapped repositories, and external forwarding ports. |
+| `airlock_list` | *(none)* | Discovers and lists all registered hypervisors and VMs across active inventory search paths (`~/.airlock/inventory/` or `$AIRLOCK_INVENTORY_DIR`), including their allocated IPs, mapped repositories, and external forwarding ports. |
 | `airlock_status` | `vm_name: str` | Queries the target VM's live status (`running`, `shut off`, etc.), current IP lease, uptime, and available disk snapshots. |
 | `airlock_detect_app` | `local_path: str` | Intelligently inspects project manifests (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `compose.yaml`) to infer framework, internal port, and `post_deploy` command. |
 | `airlock_health_check` | `vm_name: str`<br/>`app_name: str = ""` <br/>`path: str = "/"` | Probes the live hypervisor route with retries. If failing or crashing, automatically connects to the VM over SSH and captures runtime logs for instant diagnosis. |
@@ -173,7 +173,7 @@ AirlockVM provides a helper script (`connect_airlock.sh`) to automatically regis
 AirlockVM enforces strict security boundaries between the developer workstation, client codebases, and physical hypervisors:
 
 1. **Clean Client Repositories**: Client application repositories contain zero hypervisor scripts, zero libvirt configurations, and zero SSH keys. Their `.gitignore` files remain standard and minimal.
-2. **Private Inventory**: Hypervisor details, SSH access definitions, and guest configuration templates in `~/.airlock/inventory/` or repo `inventory/` are strictly local to AirlockVM and excluded from version control (`.gitignore`).
+2. **Private Inventory**: Hypervisor details, SSH access definitions, and guest configuration templates in `~/.airlock/inventory/` (or configured via `$AIRLOCK_INVENTORY_DIR`) are strictly local and decoupled from version control.
 3. **Dedicated Port Proxying**: Workloads listening on internal guest ports (e.g. `3000`) are mapped on the hypervisor host via isolated `systemd-socket-proxyd` instances (`{vm_name}-p{ext_port}-proxy.socket`). The local workstation does not run background SSH tunnels or expose local ports.
 4. **Principle of Least Privilege**: AI agents interacting with client applications only receive high-level MCP tool invocations (`airlock_deploy_app`, `airlock_status`). The agent does not need root credentials or raw SSH execution on hypervisor nodes.
 

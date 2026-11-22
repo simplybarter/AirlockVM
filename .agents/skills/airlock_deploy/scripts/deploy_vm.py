@@ -49,7 +49,7 @@ VERIFY_SCRIPT = REPO_ROOT / ".agents" / "skills" / "airlock_configure" / "script
 
 def find_default_config(vm_name: str | None = None) -> tuple[Path | None, Path | None]:
     """Finds the default VM specification (vm.yaml as SSOT) and optional runbook (VM.md)."""
-    inv_dir = REPO_ROOT / "inventory"
+    inv_dir = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
     if not inv_dir.exists():
         return None, None
 
@@ -776,9 +776,10 @@ def execute_status(params: dict) -> None:
     print(f"\n[*] Hypervisor Forwarder: {proxy_status} (http://{host}:{ext_port}/)")
 
     # Check Inventory Record
-    inv_vm_yaml = REPO_ROOT / "inventory" / host / vm_name / "vm.yaml"
+    inv_dir = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
+    inv_vm_yaml = inv_dir / host / vm_name / "vm.yaml"
     if inv_vm_yaml.exists():
-        print(f"[*] Inventory Record: {inv_vm_yaml.relative_to(REPO_ROOT)} [RECORDED]")
+        print(f"[*] Inventory Record: {inv_vm_yaml} [RECORDED]")
     else:
         print(f"[*] Inventory Record: Not registered (run add_vmhost.py {host} to register)")
     print("============================================================\n")
@@ -792,12 +793,12 @@ def sync_inventory_record(params: dict, action: str = "update", dry_run: bool = 
         return
 
     inventory_script = REPO_ROOT / ".agents" / "skills" / "airlock_inventory" / "scripts" / "add_vmhost.py"
-    inventory_root = REPO_ROOT / "inventory"
+    inventory_root = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
 
     if action == "purge":
         vm_dir = inventory_root / host / vm_name
         if vm_dir.exists():
-            print(f"    -> Removing inventory record in {vm_dir.relative_to(REPO_ROOT)}...")
+            print(f"    -> Removing inventory record in {vm_dir}...")
             if not dry_run:
                 shutil.rmtree(vm_dir, ignore_errors=True)
                 print(f"    [✓] Inventory directory removed.")

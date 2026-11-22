@@ -15,6 +15,7 @@ Tests all permutations across the AirlockVM MCP Server and sub-engines:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -36,9 +37,9 @@ from airlock.security import audit_vm_security
 
 
 AIRLOCK_ROOT = Path(__file__).resolve().parents[1]
-INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
+INVENTORY_DIR = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
 DUMMY_APP_DIR = (AIRLOCK_ROOT / ".." / "DummyAirlockApp").resolve()
-EXISTING_HOSTS = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()]
+EXISTING_HOSTS = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()] if INVENTORY_DIR.exists() else []
 REMOTE_HOST = "remotehost" if "remotehost" in EXISTING_HOSTS else (
     next((h for h in EXISTING_HOSTS if h != "localhost"), "remotehost")
 )
@@ -521,9 +522,10 @@ class TestPermutationJ_HierarchicalInventoryResolution(unittest.TestCase):
                 else:
                     os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
 
-    def test_repo_fallback(self):
+    def test_user_persistent_default(self):
         search_dirs = get_inventory_search_dirs()
-        self.assertTrue(any(d == AIRLOCK_ROOT / "inventory" for d in search_dirs))
+        self.assertIn(Path.home() / ".airlock" / "inventory", search_dirs)
+        self.assertNotIn(AIRLOCK_ROOT / "inventory", search_dirs)
         path, doc = find_vm_yaml("dummy-airlock-app-vm")
         self.assertIsNotNone(path)
         self.assertEqual(doc["vm"]["name"], "dummy-airlock-app-vm")

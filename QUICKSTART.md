@@ -79,7 +79,7 @@ The agent will autonomously use the `airlock-mcp` tools to:
 1. **Detect Tech Stack & Ports**: Inspects `package.json`, `pyproject.toml`, `requirements.txt`, or `Dockerfile`.
 2. **Select Hypervisor**: Probes available local or remote hypervisors for available vCPU and RAM headroom.
 3. **Allocate Conflict-Free Networking**: Reserves a static IP on `virbr0` and an external host proxy port.
-4. **Generate Runbook & SSOT**: Creates declarative `vm.yaml` and operational runbook `VM.md` in persistent inventory (`~/.airlock/inventory/` or repo `inventory/`).
+4. **Generate Runbook & SSOT**: Creates declarative `vm.yaml` and operational runbook `VM.md` in persistent inventory (`~/.airlock/inventory/` or via `$AIRLOCK_INVENTORY_DIR`).
 5. **Sync & Launch**: Rsyncs application code (excluding `.git/` and local secrets) into the VM and starts the service.
 
 ---

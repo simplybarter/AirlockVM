@@ -97,13 +97,14 @@ def load_defaults(path: Path | None = None) -> dict:
 
 def load_from_inventory(host: str, repo_root: Path, target_vm: str | None = None) -> dict:
     """Pre-seeds hypervisor parameters and avoids collisions from inventory/{host}/vmhost.yaml."""
-    host_dir = repo_root / "inventory" / host
+    inv_root = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
+    host_dir = inv_root / host
     yaml_file = host_dir / "vmhost.yaml"
     if not yaml_file.exists():
         print(f"Error: Inventory record for host '{host}' not found at {yaml_file}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[*] Pre-seeding configuration from inventory: {yaml_file.relative_to(repo_root)}")
+    print(f"[*] Pre-seeding configuration from inventory: {yaml_file}")
     content = yaml_file.read_text(encoding="utf-8")
     data = {}
     try:
@@ -491,11 +492,12 @@ def main():
         print(f"Configuration saved to {args.save_config}")
 
     # 7. Determine output path and write/dry-run
+    inv_root = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
     output_path = args.output
     if not output_path:
         target_host = args.from_inventory or (args.probe if args.probe and args.probe not in ("localhost", "127.0.0.1") else "localhost") or params.get("HYPERVISOR_HOST") or "localhost"
         vm_name = params.get("VM_NAME") or f"{DEFAULT_PROJECT_NAME.lower()}-vm"
-        output_path = REPO_ROOT / "inventory" / target_host / vm_name / "VM.md"
+        output_path = inv_root / target_host / vm_name / "VM.md"
 
     original_content = ""
     if output_path.exists():
@@ -515,12 +517,12 @@ def main():
 
     # Also update VM runbook in inventory if targeted from inventory
     if args.from_inventory and params.get("VM_NAME"):
-        vm_inv_dir = REPO_ROOT / "inventory" / args.from_inventory / params["VM_NAME"]
+        vm_inv_dir = inv_root / args.from_inventory / params["VM_NAME"]
         if vm_inv_dir.exists():
             vm_runbook_path = vm_inv_dir / "VM.md"
             if vm_runbook_path != output_path:
                 vm_runbook_path.write_text(rendered, encoding="utf-8")
-                print(f"Updated inventory VM runbook: {vm_runbook_path.relative_to(REPO_ROOT)}")
+                print(f"Updated inventory VM runbook: {vm_runbook_path}")
     if original_content and original_content != rendered:
         print("Updated document with customized preferences.")
     elif not original_content:

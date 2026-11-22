@@ -40,7 +40,7 @@ def detect_vm_target() -> tuple[str, str]:
     default_vm_host = f"{slug}-vm"
     default_remote_dir = f"~/{project_name}/"
 
-    inv_dir = REPO_ROOT / "inventory"
+    inv_dir = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
     if inv_dir.exists():
         # First check vm.yaml as SSOT
         yaml_candidates = list(inv_dir.glob(f"*/{slug}-vm/vm.yaml")) + sorted(inv_dir.glob("*/*/vm.yaml"))
@@ -455,19 +455,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 DEFAULT_VM="{default_vm}"
 
-# Resolve inventory search paths hierarchically:
+# Resolve inventory search paths:
 # 1. AIRLOCK_INVENTORY_DIR environment variable (highest priority)
 # 2. ~/.airlock/inventory (standard user persistent directory)
-# 3. ${{SCRIPT_DIR}}/inventory (repo-local development and test fixture fallback)
 INVENTORY_DIRS=()
 if [[ -n "${{AIRLOCK_INVENTORY_DIR:-}}" ]]; then
   INVENTORY_DIRS+=("${{AIRLOCK_INVENTORY_DIR}}")
 fi
 if [[ -d "${{HOME}}/.airlock/inventory" ]]; then
   INVENTORY_DIRS+=("${{HOME}}/.airlock/inventory")
-fi
-if [[ -d "${{SCRIPT_DIR}}/inventory" ]]; then
-  INVENTORY_DIRS+=("${{SCRIPT_DIR}}/inventory")
 fi
 if [[ ${{#INVENTORY_DIRS[@]}} -eq 0 ]]; then
   INVENTORY_DIRS+=("${{HOME}}/.airlock/inventory")
@@ -660,14 +656,14 @@ def main():
     )
     args = parser.parse_args()
 
-    inv_dir = REPO_ROOT / "inventory"
+    inv_dir = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
     exclusions = evaluate_project_exclusions()
     print(f"[*] Evaluated exclusions ({len(exclusions)} rules determined).")
 
-    # Always generate deploy_app_to_airlock.sh for inventory VMs if inventory/ exists
+    # Always generate deploy_app_to_airlock.sh for inventory VMs if inventory exists
     if inv_dir.exists():
         vm_yamls = sorted(inv_dir.glob("*/*/vm.yaml"))
-        print(f"[*] Generating deploy_app_to_airlock.sh for {len(vm_yamls)} VM(s) in inventory/...")
+        print(f"[*] Generating deploy_app_to_airlock.sh for {len(vm_yamls)} VM(s) in {inv_dir}...")
         for yf in vm_yamls:
             vm_name, repos = load_vm_repos(yf)
             vm_sync_file = yf.parent / "deploy_app_to_airlock.sh"

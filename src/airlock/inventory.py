@@ -1,9 +1,8 @@
 """AirlockVM Inventory Resolution & SSOT Locator.
 
-Provides hierarchical inventory discovery:
-1. AIRLOCK_INVENTORY_DIR environment variable (highest precedence).
+Provides two-tier inventory discovery:
+1. AIRLOCK_INVENTORY_DIR environment variable (highest precedence; override for CI / testing).
 2. ~/.airlock/inventory/ (standard user persistent location).
-3. <repo_root>/inventory/ (repo-local development and test fixture fallback).
 """
 
 from __future__ import annotations
@@ -19,49 +18,38 @@ except ImportError:
 
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
 USER_INVENTORY_DIR = Path.home() / ".airlock" / "inventory"
-REPO_INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
 
 
 def get_inventory_search_dirs() -> list[Path]:
     """Returns candidate inventory directories in priority order:
     1. AIRLOCK_INVENTORY_DIR environment variable (if set).
-    2. ~/.airlock/inventory/ (if it exists).
-    3. <repo_root>/inventory/ (if it exists).
+    2. ~/.airlock/inventory/ (standard persistent location).
     """
     dirs: list[Path] = []
     if "AIRLOCK_INVENTORY_DIR" in os.environ:
         custom_path = Path(os.environ["AIRLOCK_INVENTORY_DIR"]).expanduser().resolve()
         dirs.append(custom_path)
 
-    if USER_INVENTORY_DIR.exists() and USER_INVENTORY_DIR not in dirs:
-        dirs.append(USER_INVENTORY_DIR)
-
-    if REPO_INVENTORY_DIR.exists() and REPO_INVENTORY_DIR not in dirs:
-        dirs.append(REPO_INVENTORY_DIR)
-
-    if not dirs:
+    if USER_INVENTORY_DIR not in dirs:
         dirs.append(USER_INVENTORY_DIR)
 
     return dirs
 
 
-def get_primary_inventory_dir(prefer_user: bool = False) -> Path:
+def get_primary_inventory_dir(ensure_exists: bool = False) -> Path:
     """Returns the primary target directory for writing new inventory records:
     1. AIRLOCK_INVENTORY_DIR environment variable (if set).
-    2. ~/.airlock/inventory/ (if prefer_user is True or if it already exists).
-    3. <repo_root>/inventory/ (if it exists, for repo development/tests).
-    4. ~/.airlock/inventory/ (default for new user installs).
+    2. ~/.airlock/inventory/ (standard user persistent location).
     """
     if "AIRLOCK_INVENTORY_DIR" in os.environ:
-        return Path(os.environ["AIRLOCK_INVENTORY_DIR"]).expanduser().resolve()
+        target = Path(os.environ["AIRLOCK_INVENTORY_DIR"]).expanduser().resolve()
+    else:
+        target = USER_INVENTORY_DIR
 
-    if prefer_user or USER_INVENTORY_DIR.exists():
-        return USER_INVENTORY_DIR
+    if ensure_exists:
+        target.mkdir(parents=True, exist_ok=True)
 
-    if REPO_INVENTORY_DIR.exists():
-        return REPO_INVENTORY_DIR
-
-    return USER_INVENTORY_DIR
+    return target
 
 
 def find_vm_yaml(vm_name: str) -> tuple[Path | None, dict[str, Any] | None]:

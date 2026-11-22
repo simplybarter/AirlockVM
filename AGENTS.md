@@ -18,7 +18,7 @@ AirlockVM is an open, universally portable control plane designed to run cleanly
    * **Never** hardcode local developer usernames (e.g., `alice`, `bob`, `developer`, `admin`) in script templates, default parameters, or inventory generators.
    * User accounts must always be resolved dynamically at runtime using `getpass.getuser()` or environment variables (`os.environ.get("USER", "developer")`).
 4. **Zero Upstream Inventory Pollution Invariant**:
-   * Machine inventory (`~/.airlock/inventory/` or repo `inventory/`) represents local machine execution state. Repo `inventory/` is strictly git-ignored.
+   * Machine inventory is persistently stored at `~/.airlock/inventory/` (or overridden via `$AIRLOCK_INVENTORY_DIR`). It represents local machine execution state and is decoupled from the git repository.
    * Agents must never track, stage, or commit generated host profiles, guest VM definitions (`vm.yaml`), runbooks (`VM.md`), or private SSH keys into the git repository.
 
 ---
@@ -41,12 +41,11 @@ To prevent configuration drift, ambiguity, and redundancy, AirlockVM establishes
 
 * **Cross-Referencing Rule**: When documentation needs information outside its designated domain, it must link by reference to the authoritative document rather than redefining the concept.
 
-### 2.2 Inventory SSOT Architecture & Hierarchical Discovery
+### 2.2 Inventory SSOT Architecture & Two-Tier Discovery
 
-AirlockVM resolves inventory using a three-tier hierarchical discovery mechanism:
-1. **Explicit Environment Override**: `$AIRLOCK_INVENTORY_DIR` (highest precedence; ideal for isolated CI / test runs).
+AirlockVM resolves inventory using a two-tier discovery mechanism:
+1. **Explicit Environment Override**: `$AIRLOCK_INVENTORY_DIR` (highest precedence; ideal for isolated CI / test runs or custom team locations).
 2. **User Persistent Location**: `~/.airlock/inventory/` (standard user persistent location; decoupled from git clone paths and immune to `git clean`).
-3. **Repository Development Fallback**: `inventory/` (repo-local development and integration test fixture fallback).
 
 Within the resolved inventory hierarchy (`<inventory_root>/{vmhost}/{vm}/`):
 * **`vmhost.yaml`**: The SSOT for hypervisor capabilities (CPU threads, total RAM, storage pools, bridge networking, libvirt/qemu versions).

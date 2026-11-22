@@ -45,7 +45,7 @@ def find_repo_root() -> Path:
 
 
 REPO_ROOT = find_repo_root()
-DEFAULT_INVENTORY_ROOT = REPO_ROOT / "inventory"
+DEFAULT_INVENTORY_ROOT = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
 
 
 def run_cmd(
