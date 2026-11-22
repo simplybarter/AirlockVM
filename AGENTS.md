@@ -4,10 +4,22 @@ Guidelines, operational standards, and architectural conventions for AI agents o
 
 ---
 
-## 1. Strict Path Usage: Relative Paths Only
+## 1. Universal Portability & Zero Machine Lock-In Mandates
 
-* **Relative Paths Invariant**: All documentation files (`docs/*.md`, `README.md`, `USECASE.md`, etc.), scripts, agent skill configurations, test fixtures, and tool outputs must exclusively use **relative paths** (e.g., `docs/ARCHITECTURE.md`, `inventory/remotehost/vmhost.yaml`, `tests/test_integration_permutations.py`).
-* **Portability Invariant**: **Never** hardcode absolute local paths (e.g., `/home/...`) or host-specific URI schemes (`file:///home/...`). The control plane and its test suites must remain fully portable across developers, machines, CI/CD runners, and execution environments.
+AirlockVM is an open, universally portable control plane designed to run cleanly across any developer machine, CI/CD runner, or virtualization cluster. Agents must strictly adhere to the following four non-negotiable portability invariants:
+
+1. **Relative Paths Invariant**:
+   * All documentation files (`docs/*.md`, `README.md`, `USECASE.md`, etc.), scripts, agent skill configurations, test fixtures, and tool outputs must exclusively use **relative paths** (e.g., `docs/ARCHITECTURE.md`, `inventory/remotehost/vmhost.yaml`, `tests/test_integration_permutations.py`, `../<project_name>`).
+   * **Never** hardcode absolute local paths (e.g., `/home/...`, `/Users/...`) or host-specific URI schemes (`file:///home/...`).
+2. **Zero Private Hostnames Invariant**:
+   * **Never** introduce or commit private local machine hostnames, internal network aliases, or custom workstation names (e.g., `workstation-01`, `corp-server-02`, `dev-rig`) into code, scripts, agent skills, tests, or documentation.
+   * Always designate development machines as `localhost` and remote hypervisors as `remotehost` (or dynamically discover them from inventory).
+3. **Dynamic User Resolution Invariant**:
+   * **Never** hardcode local developer usernames (e.g., `alice`, `bob`, `developer`, `admin`) in script templates, default parameters, or inventory generators.
+   * User accounts must always be resolved dynamically at runtime using `getpass.getuser()` or environment variables (`os.environ.get("USER", "developer")`).
+4. **Zero Upstream Inventory Pollution Invariant**:
+   * `inventory/` represents local machine execution state and is strictly git-ignored.
+   * Agents must never track, stage, or commit generated host profiles, guest VM definitions (`vm.yaml`), runbooks (`VM.md`), or private SSH keys into the git repository.
 
 ---
 
