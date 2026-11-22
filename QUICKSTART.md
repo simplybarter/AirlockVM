@@ -109,6 +109,7 @@ To explore a working example, inspect the standalone reference project:
 
 ## 4. Next Steps & Architecture
 
-* Read **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** to understand the two-tier isolation model and security boundaries.
+* Read **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** to understand the two-tier isolation model and resource sizing.
+* Read **[docs/SECURITY.md](docs/SECURITY.md)** for proxy authentication mechanics, LAN exposure, and firewall hardening patterns.
 * Read **[docs/MCP_SERVER.md](docs/MCP_SERVER.md)** for detailed specifications of all 21 Model Context Protocol tools.
 * Read **[docs/INTEGRATION_TESTING.md](docs/INTEGRATION_TESTING.md)** to review the end-to-end 26-permutation verification suite.

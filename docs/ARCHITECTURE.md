@@ -54,6 +54,7 @@ Local Workstation                  Hypervisor Host               Dedicated Guest
    virsh snapshot-create-as --domain <vm-name> --name snapshot-base-clean --disk-only
    ```
    If testing produces clutter or modified dependencies, the environment can be restored to its pristine baseline state within seconds.
+3. **Comprehensive Security Specification**: For complete details on unauthenticated Layer 4 proxying (`systemd-socket-proxyd`), authentication boundaries, LAN exposure, and firewall hardening patterns (SSH tunnels, UFW, reverse proxy auth), see **[docs/SECURITY.md](SECURITY.md)**.
 
 ---
 

@@ -8,7 +8,7 @@
 
 > **Dedicated Execution Virtual Machine Control Plane, Runbook Sizing, and MCP Server**
 
-[📖 Zero-Workload Use Case](USECASE.md) • [🏗 Architecture](docs/ARCHITECTURE.md) • [🔌 MCP Server](docs/MCP_SERVER.md) • [🧪 Integration Testing](docs/INTEGRATION_TESTING.md) • [⚡ Quickstart](#getting-started) • [🤝 Contributing](CONTRIBUTING.md)
+[📖 Zero-Workload Use Case](USECASE.md) • [🏗 Architecture](docs/ARCHITECTURE.md) • [🛡️ Security](docs/SECURITY.md) • [🔌 MCP Server](docs/MCP_SERVER.md) • [🧪 Integration Testing](docs/INTEGRATION_TESTING.md) • [⚡ Quickstart](#getting-started) • [🤝 Contributing](CONTRIBUTING.md)
 
 AirlockVM provides automated tooling and a parameterized specification framework to configure, size, and deploy dedicated Linux KVM execution virtual machines for development teams and AI agents.
 

@@ -33,6 +33,7 @@ To prevent configuration drift, ambiguity, and redundancy, AirlockVM establishes
 | :--- | :--- |
 | **`QUICKSTART.md`** | **Newcomer & Agent Quickstart:** 5-minute onboarding walkthrough, installation, multi-IDE connector, and basic workflow. |
 | **`docs/ARCHITECTURE.md`** | **System Architecture & Isolation Model:** Two-tier hypervisor topology, resource budgeting (vCPU/RAM), `qcow2` storage, socket proxying, and credential zero-leak boundaries. |
+| **`docs/SECURITY.md`** | **Security & Proxy Isolation Model:** Layer 4 socket proxy mechanics, authentication boundaries, credential zero-leak invariants, and hypervisor hardening. |
 | **`docs/MCP_SERVER.md`** | **MCP Protocol & Tooling Specification:** Detailed JSON schemas, tools, subcommands, arguments, and return types for the `airlock-mcp` Model Context Protocol control plane. |
 | **`docs/INTEGRATION_TESTING.md`** | **End-to-End Verification Matrix:** 26-permutation verification lifecycle, multi-IDE connector validation, test fixtures (`DummyAirlockApp`), and automated rollback testing. |
 | **`USECASE.md`** | **Operational Problem Space & Solutions:** Motivation, developer pain points, container escape risks, and real-world deployment patterns. |
