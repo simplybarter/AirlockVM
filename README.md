@@ -14,6 +14,8 @@ AirlockVM provides automated tooling and a parameterized specification framework
 
 By strictly separating software engineering workstations from runtime execution environments, AirlockVM enforces an isolation boundary: all builds, crawler loops, browser automation, and untrusted code evaluation execute inside dedicated guest VMs hosted on local or remote hypervisors.
 
+> 🚀 **New to AirlockVM? Check out the [5-Minute Quickstart Guide](QUICKSTART.md)!**
+
 ---
 
 ## Key Features

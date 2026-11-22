@@ -31,6 +31,7 @@ To prevent configuration drift, ambiguity, and redundancy, AirlockVM establishes
 
 | Document | Authoritative Domain (SSOT) |
 | :--- | :--- |
+| **`QUICKSTART.md`** | **Newcomer & Agent Quickstart:** 5-minute onboarding walkthrough, installation, multi-IDE connector, and basic workflow. |
 | **`docs/ARCHITECTURE.md`** | **System Architecture & Isolation Model:** Two-tier hypervisor topology, resource budgeting (vCPU/RAM), `qcow2` storage, socket proxying, and credential zero-leak boundaries. |
 | **`docs/MCP_SERVER.md`** | **MCP Protocol & Tooling Specification:** Detailed JSON schemas, tools, subcommands, arguments, and return types for the `airlock-mcp` Model Context Protocol control plane. |
 | **`docs/INTEGRATION_TESTING.md`** | **End-to-End Verification Matrix:** 26-permutation verification lifecycle, multi-IDE connector validation, test fixtures (`DummyAirlockApp`), and automated rollback testing. |
