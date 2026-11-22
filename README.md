@@ -28,7 +28,7 @@ By strictly separating software engineering workstations from runtime execution 
 * **Conflict-Free Network Discovery**: Queries libvirt networks (such as `default` / `virbr0`), inspects active DHCP leases, allocates the next unassigned static IP, and generates unique collision-free MAC addresses (`52:54:00:xx:xx:xx`).
 * **Automated Project-to-VM Naming**: Derives the project name from the repository root folder, auto-generating domain names (`<project>-vm`), service units, and user accounts.
 * **Automated Virtual Machine Deployment (`airlock_deploy`)**: Launches the execution VM using `inventory/{vmhost}/{vm}/vm.yaml` as the Single Source of Truth (SSOT) with strict pre-requisite verification gates, automated cloud-init image seeding, static DHCP reservations, and systemd socket forwarding.
-* **Intelligent Code Synchronization (`airlock_rsync`)**: Evaluates project manifests (Python, Node.js, Rust, Go) and generates an optimized `deploy_app_to_vm.sh` script to deploy ONLY application code to the VM while ignoring local caches and agent files.
+* **Intelligent Code Synchronization (`airlock_rsync`)**: Evaluates project manifests (Python, Node.js, Rust, Go) and generates an optimized `deploy_app_to_airlock.sh` script to deploy ONLY application code to the VM while ignoring local caches and agent files.
 * **Multi-IDE Client Connector (`connect_airlock.sh`)**: One-command client onboarding across VS Code, Cursor, Claude Code, Antigravity, Windsurf, and JetBrains with zero manual JSON edits.
 * **Antigravity AI Agent Skills**: Includes ready-to-use `.agents/skills/airlock_inventory`, `.agents/skills/airlock_configure`, `.agents/skills/airlock_deploy`, and `.agents/skills/airlock_rsync` skills for autonomous agent-driven hypervisor discovery, VM customization, provisioning, and workspace sync.
 
@@ -70,7 +70,7 @@ By strictly separating software engineering workstations from runtime execution 
 ├── pyproject.toml                           # Modern PEP 621 packaging & CLI entry points
 ├── requirements.txt                         # Package dependencies (pyyaml, mcp)
 ├── connect_airlock.sh                        # Multi-IDE onboarding & MCP registration script
-├── deploy_app_to_vm.sh                      # Multi-VM application deployment dispatcher
+├── deploy_app_to_airlock.sh                      # Multi-VM application deployment dispatcher
 ├── src/airlock/                             # AirlockVM Python package & Intelligence Engines
 │   ├── __init__.py                          # Package initialization
 │   ├── cli.py                               # Unified 'airlock' CLI entrypoint
@@ -93,7 +93,7 @@ By strictly separating software engineering workstations from runtime execution 
 │       └── {vm}/                            # Virtual machine directory
 │           ├── vm.yaml                      # Documented VM record + blueprint (SSOT)
 │           ├── VM.md                        # Rendered VM operational runbook
-│           └── deploy_app_to_vm.sh          # Co-located VM sync script
+│           └── deploy_app_to_airlock.sh          # Co-located VM sync script
 ├── docs/                                    # Architecture, security & MCP documentation
 │   ├── ARCHITECTURE.md                      # Security model and isolation topology
 │   ├── MCP_SERVER.md                        # Model Context Protocol server reference
@@ -279,19 +279,19 @@ python3 .agents/skills/airlock_deploy/scripts/deploy_vm.py --yes
 
 ### 8. Deploy Application Code to VM
 
-Generate an optimized `deploy_app_to_vm.sh` script to mirror your application files into the VM:
+Generate an optimized `deploy_app_to_airlock.sh` script to mirror your application files into the VM:
 
 ```bash
 # Generate the deployment script tailored to your project stack:
 python3 .agents/skills/airlock_rsync/scripts/generate_sync.py
 
 # Perform differential deployment (default VM):
-./deploy_app_to_vm.sh
+./deploy_app_to_airlock.sh
 
 # Or dispatch deployment to a specific inventory VM:
-./deploy_app_to_vm.sh --list
-./deploy_app_to_vm.sh appsurfer-vm --dry-run
-./deploy_app_to_vm.sh --all
+./deploy_app_to_airlock.sh --list
+./deploy_app_to_airlock.sh appsurfer-vm --dry-run
+./deploy_app_to_airlock.sh --all
 ```
 
 ---
@@ -330,4 +330,4 @@ This repository includes skill definitions compatible with Antigravity AI coding
 * `/airlock_inventory` — Discover, profile, and document hypervisors and VMs in `inventory/{vmhost}/{vm}/`.
 * `/airlock_configure` — Probe hypervisors and generate parameterized VM execution runbooks.
 * `/airlock_deploy` — Deploy, provision, and manage execution VMs with strict validation gates.
-* `/airlock_rsync` — Evaluate project structure and generate the optimized `deploy_app_to_vm.sh` script.
+* `/airlock_rsync` — Evaluate project structure and generate the optimized `deploy_app_to_airlock.sh` script.

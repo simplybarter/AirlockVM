@@ -65,7 +65,7 @@ AirlockVM provides four complementary, composable skills for autonomous AI agent
 flowchart TD
     Inv["1. airlock_inventory<br/>Discover & record hypervisors & VMs<br/>(inventory/{vmhost}/)"] --> Conf["2. airlock_configure<br/>Parameterize VM runbook from template<br/>(VM.md.template -> VM.md)"]
     Conf --> Deploy["3. airlock_deploy<br/>Enforce pre-flight gates, provision domain,<br/>cloud-init seed & socket proxy"]
-    Deploy --> Rsync["4. airlock_rsync<br/>Evaluate project manifest & exclude rules,<br/>deploy app to VM (deploy_app_to_vm.sh)"]
+    Deploy --> Rsync["4. airlock_rsync<br/>Evaluate project manifest & exclude rules,<br/>deploy app to VM (deploy_app_to_airlock.sh)"]
 ```
 
 ### Stage 1: Discovery & Documentation (`airlock_inventory`)
@@ -81,7 +81,7 @@ flowchart TD
 * **Lifecycle**: Provides full lifecycle commands (`--start`, `--stop`, `--status`, `--snapshot`, `--rollback`, `--validate-proxy`).
 
 ### Stage 4: Workload Deployment (`airlock_rsync`)
-* **Role**: Evaluates project manifests (`package.json`, `requirements.txt`, etc.) and dynamically builds an optimized application deployment script (`deploy_app_to_vm.sh`).
+* **Role**: Evaluates project manifests (`package.json`, `requirements.txt`, etc.) and dynamically builds an optimized application deployment script (`deploy_app_to_airlock.sh`).
 * **Boundary**: Strictly excludes local developer caches, IDE state, documentation, agent configs, and version control directories, ensuring only necessary runtime application code reaches the execution VM.
 
 ---

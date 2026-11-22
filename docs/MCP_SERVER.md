@@ -26,7 +26,7 @@ flowchart TD
     subgraph AirlockVMControlPlane["AirlockVM Control Plane (Standalone)"]
         MCP["AirlockVM MCP Server<br/>(airlock-mcp stdio / Python 3.14)"]
         SSOT["Inventory SSOT<br/>(inventory/{vmhost}/{vm}/vm.yaml)"]
-        Core["Core Engine<br/>(deploy_vm.py / deploy_app_to_vm.sh)"]
+        Core["Core Engine<br/>(deploy_vm.py / deploy_app_to_airlock.sh)"]
     end
 
     subgraph Hypervisors["Physical / Local Hypervisors"]
@@ -105,7 +105,7 @@ The MCP server exposes standard, declarative tools enabling agents to inspect, d
 | `airlock_attach_app` | `vm_name: str`<br/>`local_path: str`<br/>`app_name: str = ""` <br/>`internal_port: int = 0`<br/>`external_port: int = 0`<br/>`post_deploy: str = ""` | Registers or updates an application repository in an existing `inventory/{vmhost}/{vm}/vm.yaml`. Auto-detects stack/ports/commands if omitted, and auto-allocates conflict-free host ports. |
 | `airlock_preflight` | `vm_name: str` | Non-destructive pre-flight deployability confirmation: live probe of SSH/sudo, /dev/kvm, libvirtd, IP silence, port conflicts, disk headroom, and host RAM safety. Returns verdict (`READY_TO_DEPLOY` / `BLOCKED`) with confidence score. |
 | `airlock_deploy_vm` | `vm_name: str`<br/>`dry_run: bool = False` | Enforces pre-flight capability checks and provisions/updates the VM domain: SSH key generation, static DHCP reservations on `virbr0`, cloud-init NoCloud ISO seeding, `virt-install`, and hypervisor `systemd-socket-proxyd` forwarders for all mapped repository ports. |
-| `airlock_deploy_app` | `vm_name: str`<br/>`app_name: str = ""` <br/>`dry_run: bool = False`<br/>`no_restart: bool = False`<br/>`offline: bool = False`<br/>`checkpoint: bool = False`<br/>`verify_health: bool = False` | Synchronizes application source code to the target VM using `deploy_app_to_vm.sh`. Optionally creates safety snapshot checkpoints and verifies HTTP route health post-deploy. |
+| `airlock_deploy_app` | `vm_name: str`<br/>`app_name: str = ""` <br/>`dry_run: bool = False`<br/>`no_restart: bool = False`<br/>`offline: bool = False`<br/>`checkpoint: bool = False`<br/>`verify_health: bool = False` | Synchronizes application source code to the target VM using `deploy_app_to_airlock.sh`. Optionally creates safety snapshot checkpoints and verifies HTTP route health post-deploy. |
 
 ---
 

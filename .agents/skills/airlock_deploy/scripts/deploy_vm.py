@@ -1136,7 +1136,7 @@ def main():
         print("============================================================")
         print("Next steps:")
         print(f"  1. Connect interactively:   ssh {vm_name}")
-        print(f"  2. Synchronize application: ./deploy_app_to_vm.sh")
+        print(f"  2. Synchronize application: ./deploy_app_to_airlock.sh")
         print(f"  3. Access web application:  http://{host}:{params['PROXY_EXTERNAL_PORT']}/")
         print("============================================================\n")
 

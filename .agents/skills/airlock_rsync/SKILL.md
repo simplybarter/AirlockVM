@@ -1,7 +1,7 @@
 ---
 name: airlock_rsync
 description: >-
-  Evaluates project source code and dependencies to generate an optimized 'deploy_app_to_vm.sh'
+  Evaluates project source code and dependencies to generate an optimized 'deploy_app_to_airlock.sh'
   script in the project root. The generated script synchronizes ONLY the application files
   necessary to run and test workloads inside the dedicated AirlockVM virtual machine, excluding
   version control, documentation, agent configs, and local build artifacts.
@@ -9,7 +9,7 @@ description: >-
 
 # AirlockVM Rsync Generator Skill (`airlock_rsync`)
 
-This skill evaluates your project directory to determine the exact tech stack (Python, Node.js, Go, Rust, Docker, static assets) and generates an optimized, executable [`deploy_app_to_vm.sh`](../../../deploy_app_to_vm.sh) in the project root.
+This skill evaluates your project directory to determine the exact tech stack (Python, Node.js, Go, Rust, Docker, static assets) and generates an optimized, executable [`deploy_app_to_airlock.sh`](../../../deploy_app_to_airlock.sh) in the project root.
 
 The generated script ensures that **ONLY code needed to run the application on the VM is synchronized**, while excluding heavy local caches, local dependencies, virtual environments, documentation, and agent configurations.
 
@@ -33,15 +33,15 @@ The generated script ensures that **ONLY code needed to run the application on t
 2. **Intelligent Stack Evaluation**:
    * Analyzes project manifests (`requirements.txt`, `package.json`, `Cargo.toml`, `go.mod`, `Dockerfile`).
    * Determines files that must **never** be copied to the VM (such as `.git/`, `.agents/`, local `node_modules/`, `venv/`, `.env*.local`, and documentation).
-3. **Generates `deploy_app_to_vm.sh`**:
+3. **Generates `deploy_app_to_airlock.sh`**:
    * Writes a ready-to-run, executable shell script in the project root.
-   * Dispatches deployments to dedicated VM scripts in `inventory/<vmhost>/<vm>/deploy_app_to_vm.sh`.
+   * Dispatches deployments to dedicated VM scripts in `inventory/<vmhost>/<vm>/deploy_app_to_airlock.sh`.
 
 ---
 
 ## Usage
 
-### 1. Generate or Update `deploy_app_to_vm.sh`
+### 1. Generate or Update `deploy_app_to_airlock.sh`
 
 Run the generator from your repository:
 
@@ -57,29 +57,29 @@ python3 .agents/skills/airlock_rsync/scripts/generate_sync.py \
   --remote-dir ~/my-app/
 ```
 
-### 2. Using `deploy_app_to_vm.sh` (Multi-VM Dispatcher & Deployment)
+### 2. Using `deploy_app_to_airlock.sh` (Multi-VM Dispatcher & Deployment)
 
-When `inventory/` is present, `./deploy_app_to_vm.sh` acts as a multi-VM dispatcher that forwards commands to each VM's dedicated deployment script (`inventory/<vmhost>/<vm>/deploy_app_to_vm.sh`).
+When `inventory/` is present, `./deploy_app_to_airlock.sh` acts as a multi-VM dispatcher that forwards commands to each VM's dedicated deployment script (`inventory/<vmhost>/<vm>/deploy_app_to_airlock.sh`).
 
 ```bash
 # List all discovered inventory VMs and their deployment scripts:
-./deploy_app_to_vm.sh --list
+./deploy_app_to_airlock.sh --list
 
 # Deploy to default VM (e.g. airlock-vm):
-./deploy_app_to_vm.sh
+./deploy_app_to_airlock.sh
 
 # Deploy to a specific VM:
-./deploy_app_to_vm.sh appsurfer-vm
-./deploy_app_to_vm.sh rugbyasssistant-vm
+./deploy_app_to_airlock.sh appsurfer-vm
+./deploy_app_to_airlock.sh rugbyasssistant-vm
 
 # Pass rsync options (e.g., --offline, --dry-run, --delete, --no-restart):
-./deploy_app_to_vm.sh --offline
-./deploy_app_to_vm.sh appsurfer-vm --dry-run
-./deploy_app_to_vm.sh airlock-vm --delete
-./deploy_app_to_vm.sh --no-restart     # Sync files only without running post-deploy commands
+./deploy_app_to_airlock.sh --offline
+./deploy_app_to_airlock.sh appsurfer-vm --dry-run
+./deploy_app_to_airlock.sh airlock-vm --delete
+./deploy_app_to_airlock.sh --no-restart     # Sync files only without running post-deploy commands
 
 # Deploy application to all inventory VMs sequentially:
-./deploy_app_to_vm.sh --all
+./deploy_app_to_airlock.sh --all
 ```
 
 ### 3. Dynamic Post-Deploy Hooks (`post_deploy`)
@@ -94,13 +94,13 @@ repositories:
     post_deploy: "pip install -e . && python3 -m appsurfer.server" # or "docker compose up -d"
 ```
 
-* When `post_deploy` is configured, `deploy_app_to_vm.sh` automatically executes the command inside the repository's remote path on the VM after rsync finishes.
+* When `post_deploy` is configured, `deploy_app_to_airlock.sh` automatically executes the command inside the repository's remote path on the VM after rsync finishes.
 * Use `--dry-run` to preview the planned post-deploy command without running it.
 * Use `--no-restart` or `--sync-only` to sync code without triggering the post-deploy command.
 
 You can also run any VM's deployment script directly:
 ```bash
-./inventory/remotehost/appsurfer-vm/deploy_app_to_vm.sh --offline
+./inventory/remotehost/appsurfer-vm/deploy_app_to_airlock.sh --offline
 ```
 
 ### Dry-Run Itemized Change Legend

@@ -44,7 +44,7 @@ Work inside your favorite IDE on your workstation as usual. You have full access
 Deploy your application code into the local VM in milliseconds using the generated deployment script:
 ```bash
 # Push application changes to the dedicated VM (skips caches, venvs, and docs)
-./deploy_app_to_vm.sh
+./deploy_app_to_airlock.sh
 ```
 *(Generated automatically by the `airlock_rsync` skill; alternatively, attach via VS Code Remote-SSH to edit directly inside the VM).*
 

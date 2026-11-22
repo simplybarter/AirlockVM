@@ -37,7 +37,9 @@ INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
 DEPLOY_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py"
 CONFIGURE_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_configure" / "scripts" / "configure_vm.py"
 GENERATE_SYNC_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_rsync" / "scripts" / "generate_sync.py"
-ROOT_DISPATCHER = AIRLOCK_ROOT / "deploy_app_to_vm.sh"
+ROOT_DISPATCHER = AIRLOCK_ROOT / "deploy_app_to_airlock.sh"
+if not ROOT_DISPATCHER.exists() and (AIRLOCK_ROOT / "deploy_app_to_vm.sh").exists():
+    ROOT_DISPATCHER = AIRLOCK_ROOT / "deploy_app_to_vm.sh"
 PYTHON_BIN = AIRLOCK_ROOT / ".venv" / "bin" / "python"
 if not PYTHON_BIN.exists():
     PYTHON_BIN = Path(sys.executable)

@@ -28,7 +28,9 @@ if not PYTHON_BIN.exists():
 
 DEPLOY_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py"
 CONFIGURE_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_configure" / "scripts" / "configure_vm.py"
-SYNC_DISPATCHER = AIRLOCK_ROOT / "deploy_app_to_vm.sh"
+SYNC_DISPATCHER = AIRLOCK_ROOT / "deploy_app_to_airlock.sh"
+if not SYNC_DISPATCHER.exists() and (AIRLOCK_ROOT / "deploy_app_to_vm.sh").exists():
+    SYNC_DISPATCHER = AIRLOCK_ROOT / "deploy_app_to_vm.sh"
 CONNECT_SCRIPT = AIRLOCK_ROOT / "connect_airlock.sh"
 
 

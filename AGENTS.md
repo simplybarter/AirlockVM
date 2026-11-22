@@ -45,7 +45,7 @@ To prevent configuration drift, ambiguity, and redundancy, AirlockVM establishes
 * **`inventory/{vmhost}/vmhost.yaml`**: The SSOT for hypervisor capabilities (CPU threads, total RAM, storage pools, bridge networking, libvirt/qemu versions).
 * **`inventory/{vmhost}/{vm}/vm.yaml`**: The canonical declarative SSOT for an individual guest virtual machine domain (state, hardware resources, static IP/MAC, proxy ports, and attached repository blueprints).
 * **`inventory/{vmhost}/{vm}/VM.md`**: The parameterized operational runbook rendered directly from the `vm.yaml` SSOT.
-* **`deploy_app_to_vm.sh`**: The root multi-VM dispatcher generated deterministically from all registered inventory records.
+* **`deploy_app_to_airlock.sh`**: The root multi-VM dispatcher generated deterministically from all registered inventory records.
 
 ---
 

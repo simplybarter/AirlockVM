@@ -81,7 +81,7 @@ AirlockVM supports two deployment models established via conversation between th
   - Automatically allocates a clean external forwarder port on hypervisor `remotehost`.
   - Generates `inventory/remotehost/dummy-airlock-app-vm/vm.yaml` (SSOT).
   - Generates parameterized operational runbook `inventory/remotehost/dummy-airlock-app-vm/VM.md`.
-  - Generates `inventory/remotehost/dummy-airlock-app-vm/deploy_app_to_vm.sh` and registers with root dispatcher.
+  - Generates `inventory/remotehost/dummy-airlock-app-vm/deploy_app_to_airlock.sh` and registers with root dispatcher.
 
 ---
 
