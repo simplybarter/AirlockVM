@@ -9,7 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INVENTORY_DIR="${SCRIPT_DIR}/inventory"
-DEFAULT_VM="test-shared-staging-vm"
+DEFAULT_VM="dummy-airlock-app-vm"
 
 list_vms() {
   echo "Available AirlockVM Virtual Machines in inventory:"

@@ -1,6 +1,6 @@
 # AirlockVM Integration Testing Guide
 
-This document outlines the end-to-end integration testing strategy for the **AirlockVM MCP Control Plane** using the standalone test application `DummyAirlockVMApp`.
+This document outlines the end-to-end integration testing strategy for the **AirlockVM MCP Control Plane** using the standalone test application `DummyAirlockApp`.
 
 ---
 
@@ -14,9 +14,9 @@ The primary goal of integration testing is to verify that an external, decoupled
 
 ---
 
-## 2. Test Fixture: `DummyAirlockVMApp`
+## 2. Test Fixture: `DummyAirlockApp`
 
-* **Repository Path**: `../DummyAirlockVMApp` (relative to AirlockVM root)
+* **Repository Path**: `../DummyAirlockApp` (relative to AirlockVM root)
 * **Stack**: Node.js standard HTTP server (zero external npm dependencies required)
 * **Binding**: Listens on environment variables `HOST` (`0.0.0.0`) and `PORT` (`3000`)
 * **Post-Deploy Command**: `npm start` (or `node server.js`)
@@ -24,7 +24,7 @@ The primary goal of integration testing is to verify that an external, decoupled
   ```json
   {
     "status": "ok",
-    "message": "Hello from DummyAirlockVMApp!",
+    "message": "Hello from DummyAirlockApp!",
     "boundHost": "0.0.0.0",
     "boundPort": 3000,
     "timestamp": "2026-11-21T10:18:23.326Z"
@@ -37,7 +37,7 @@ The primary goal of integration testing is to verify that an external, decoupled
 
 ```mermaid
 flowchart TD
-    P1["Phase 1: Client Project Onboarding<br/>(connect_airlock.sh --target DummyAirlockVMApp)"] --> Strategy{"Strategy Conversation:<br/>Dedicated VM or Shared Attach?"}
+    P1["Phase 1: Client Project Onboarding<br/>(connect_airlock.sh --target DummyAirlockApp)"] --> Strategy{"Strategy Conversation:<br/>Dedicated VM or Shared Attach?"}
     Strategy -->|Dedicated VM| P2A["Phase 2A: New Dedicated VM<br/>(MCP: airlock_create_vm)"]
     Strategy -->|Shared Attach| P2B["Phase 2B: Attach to Existing VM<br/>(MCP: airlock_attach_app)"]
     P2A --> P3["Phase 3: Hypervisor Provisioning & Proxies<br/>(MCP: airlock_deploy_vm)"]
@@ -52,9 +52,9 @@ flowchart TD
 ## 4. Test Phases & Execution Steps
 
 ### Phase 1: Client Onboarding (`connect_airlock.sh`)
-* **Action**: Run the AirlockVM connector script targeting `DummyAirlockVMApp`:
+* **Action**: Run the AirlockVM connector script targeting `DummyAirlockApp`:
   ```bash
-  ./connect_airlock.sh --target ../DummyAirlockVMApp
+  ./connect_airlock.sh --target ../DummyAirlockApp
   ```
 * **Success Criteria**:
   - Creates `<client-project>/.gemini/mcp_config.json`.
@@ -65,14 +65,14 @@ flowchart TD
 ### Phase 2: Topology Decision & VM Registration
 
 AirlockVM supports two deployment models established via conversation between the user, agent, and MCP server:
-* **Option A: Dedicated VM (`airlock_create_vm`)** *(Selected for DummyAirlockVMApp)*: Creates an isolated, dedicated virtual machine domain (`dummyairlockapp-vm`) with dedicated static IP, MAC, SSH keys, runbook (`VM.md`), and systemd proxy forwarders.
+* **Option A: Dedicated VM (`airlock_create_vm`)** *(Selected for DummyAirlockApp)*: Creates an isolated, dedicated virtual machine domain (`dummyairlockapp-vm`) with dedicated static IP, MAC, SSH keys, runbook (`VM.md`), and systemd proxy forwarders.
 * **Option B: Attach to Existing VM (`airlock_attach_app`)**: Attaches the project to a shared development or staging worker (e.g. `airlock-vm`).
 
 #### Executing Phase 2A: Dedicated VM Creation (`airlock_create_vm`)
 * **Action**: Invoke the MCP tool `airlock_create_vm`:
   ```json
   {
-    "local_path": "/path/to/DummyAirlockVMApp"
+    "local_path": "/path/to/DummyAirlockApp"
   }
   ```
 * **Success Criteria**:
