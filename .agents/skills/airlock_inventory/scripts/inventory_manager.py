@@ -5,6 +5,7 @@ Provides convenient listing, inspection, and querying of recorded hypervisors an
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -29,6 +30,16 @@ def find_repo_root() -> Path:
 
 REPO_ROOT = find_repo_root()
 INVENTORY_ROOT = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
+
+
+def format_path(p: Path) -> str:
+    try:
+        return str(p.relative_to(REPO_ROOT))
+    except ValueError:
+        try:
+            return f"~/{p.relative_to(Path.home())}"
+        except ValueError:
+            return str(p)
 
 
 def list_inventory(inventory_root: Path):
@@ -64,7 +75,7 @@ def list_inventory(inventory_root: Path):
                 host_status = "yaml parse error"
 
         print(f"\n[Host] {host_dir.name} {host_specs} [{host_status}]")
-        print(f"       File: {host_yaml.relative_to(REPO_ROOT) if host_yaml.exists() else 'missing'}")
+        print(f"       File: {format_path(host_yaml) if host_yaml.exists() else 'missing'}")
 
         # Subdirectories (VMs)
         vms = [v for v in host_dir.iterdir() if v.is_dir()]
@@ -89,7 +100,7 @@ def list_inventory(inventory_root: Path):
                     except Exception:
                         vm_detail = "[error reading vm.yaml]"
                 print(f"       • VM: {vm_dir.name:<22} {vm_detail}")
-                print(f"             Path: {vm_dir.relative_to(REPO_ROOT)}/vm.yaml")
+                print(f"             Path: {format_path(vm_yaml)}")
 
     print("\n" + "=" * 70 + "\n")
 

@@ -6,6 +6,7 @@ and generates an optimized 'deploy_app_to_airlock.sh' in the project root.
 """
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -31,6 +32,16 @@ def find_repo_root() -> Path:
 
 REPO_ROOT = find_repo_root()
 DEFAULT_OUTPUT_SCRIPT = REPO_ROOT / "deploy_app_to_airlock.sh"
+
+
+def format_path(p: Path) -> str:
+    try:
+        return str(p.relative_to(REPO_ROOT))
+    except ValueError:
+        try:
+            return f"~/{p.relative_to(Path.home())}"
+        except ValueError:
+            return str(p)
 
 
 def detect_vm_target() -> tuple[str, str]:
@@ -670,7 +681,7 @@ def main():
             content = generate_shell_script(vm_name, repos, exclusions)
             vm_sync_file.write_text(content, encoding="utf-8")
             vm_sync_file.chmod(0o755)
-            print(f"    [✓] Generated: {vm_sync_file.relative_to(REPO_ROOT)} ({len(repos)} repo(s))")
+            print(f"    [✓] Generated: {format_path(vm_sync_file)} ({len(repos)} repo(s))")
 
     # Determine default / target VM
     default_host, default_dir = detect_vm_target()

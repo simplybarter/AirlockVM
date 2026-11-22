@@ -11,19 +11,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_VM="dummy-airlock-app-vm"
 
-# Resolve inventory search paths hierarchically:
+# Resolve inventory search paths:
 # 1. AIRLOCK_INVENTORY_DIR environment variable (highest priority)
 # 2. ~/.airlock/inventory (standard user persistent directory)
-# 3. ${SCRIPT_DIR}/inventory (repo-local development and test fixture fallback)
 INVENTORY_DIRS=()
 if [[ -n "${AIRLOCK_INVENTORY_DIR:-}" ]]; then
   INVENTORY_DIRS+=("${AIRLOCK_INVENTORY_DIR}")
 fi
 if [[ -d "${HOME}/.airlock/inventory" ]]; then
   INVENTORY_DIRS+=("${HOME}/.airlock/inventory")
-fi
-if [[ -d "${SCRIPT_DIR}/inventory" ]]; then
-  INVENTORY_DIRS+=("${SCRIPT_DIR}/inventory")
 fi
 if [[ ${#INVENTORY_DIRS[@]} -eq 0 ]]; then
   INVENTORY_DIRS+=("${HOME}/.airlock/inventory")

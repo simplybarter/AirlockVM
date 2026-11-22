@@ -88,6 +88,16 @@ PARAM_DESCRIPTIONS = {
 }
 
 
+def format_path(p: Path) -> str:
+    try:
+        return str(p.relative_to(REPO_ROOT))
+    except ValueError:
+        try:
+            return f"~/{p.relative_to(Path.home())}"
+        except ValueError:
+            return str(p)
+
+
 def load_defaults(path: Path | None = None) -> dict:
     if path and path.exists():
         with open(path, "r", encoding="utf-8") as f:
@@ -218,7 +228,7 @@ def load_from_inventory(host: str, repo_root: Path, target_vm: str | None = None
             vm_obj = parsed_vm.get("vm", {})
             bp = vm_obj.get("blueprint", {})
             if bp:
-                print(f"[*] Layering blueprint from {vm_yaml_path.relative_to(repo_root)}")
+                print(f"[*] Layering blueprint from {format_path(vm_yaml_path)}")
                 if bp.get("project_name"): data["PROJECT_NAME"] = bp["project_name"]
                 if bp.get("primary_user"): data["VM_PRIMARY_USER"] = bp["primary_user"]
                 if bp.get("secondary_user"): data["VM_SECONDARY_USER"] = bp["secondary_user"]

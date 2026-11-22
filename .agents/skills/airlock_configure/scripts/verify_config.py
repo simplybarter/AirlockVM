@@ -5,6 +5,7 @@ Ensures all placeholders in template are accounted for in airlock_inventory temp
 """
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -26,6 +27,16 @@ def find_repo_root() -> Path:
 
 REPO_ROOT = find_repo_root()
 INVENTORY_TEMPLATES_DIR = REPO_ROOT / ".agents" / "skills" / "airlock_inventory" / "template"
+
+
+def format_path(p: Path) -> str:
+    try:
+        return str(p.relative_to(REPO_ROOT))
+    except ValueError:
+        try:
+            return f"~/{p.relative_to(Path.home())}"
+        except ValueError:
+            return str(p)
 
 # Direct mapping of VM.md placeholders provided by airlock_inventory
 INVENTORY_PROVIDED_SCHEMA = {
@@ -115,7 +126,7 @@ def check_all_inventory_runbooks(repo_root: Path) -> bool:
         print("NOTICE: No VM.md runbooks found in inventory/ to audit.")
         return True
 
-    print(f"Auditing {len(vm_runbooks)} inventory runbook(s) in {inv_dir.relative_to(repo_root)}/...")
+    print(f"Auditing {len(vm_runbooks)} inventory runbook(s) in {format_path(inv_dir)}/...")
     all_ok = True
     for rb in vm_runbooks:
         if not check_rendered_doc(rb):

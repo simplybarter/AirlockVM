@@ -6,6 +6,7 @@ Ensures template syntax, defaults coverage, and validity of all generated invent
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -36,6 +37,16 @@ REPO_ROOT = find_repo_root()
 INVENTORY_ROOT = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
 
 
+def format_path(p: Path) -> str:
+    try:
+        return str(p.relative_to(REPO_ROOT))
+    except ValueError:
+        try:
+            return f"~/{p.relative_to(Path.home())}"
+        except ValueError:
+            return str(p)
+
+
 def check_template_syntax(template_path: Path) -> list[str]:
     print(f"[*] Checking template syntax: {template_path.name}")
     content = template_path.read_text(encoding="utf-8")
@@ -62,18 +73,18 @@ def check_inventory_yaml_files(inventory_root: Path) -> bool:
         text = yf.read_text(encoding="utf-8")
         leftovers = re.findall(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}", text)
         if leftovers:
-            print(f"    [-] ERROR: Unrendered template tags remain in {yf.relative_to(REPO_ROOT)}: {set(leftovers)}")
+            print(f"    [-] ERROR: Unrendered template tags remain in {format_path(yf)}: {set(leftovers)}")
             all_ok = False
         else:
             if yaml is not None:
                 try:
                     yaml.safe_load(text)
-                    print(f"    [✓] Valid YAML: {yf.relative_to(REPO_ROOT)}")
+                    print(f"    [✓] Valid YAML: {format_path(yf)}")
                 except Exception as e:
-                    print(f"    [-] Invalid YAML in {yf.relative_to(REPO_ROOT)}: {e}")
+                    print(f"    [-] Invalid YAML in {format_path(yf)}: {e}")
                     all_ok = False
             else:
-                print(f"    [✓] Clean tags: {yf.relative_to(REPO_ROOT)}")
+                print(f"    [✓] Clean tags: {format_path(yf)}")
 
     return all_ok
 
