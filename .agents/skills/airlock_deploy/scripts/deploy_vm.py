@@ -770,7 +770,10 @@ def execute_status(params: dict) -> None:
         print(f"    [!] SSH to '{vm_name}' is currently UNREACHABLE (VM may be booting or shut off).")
 
     # Check Hypervisor Proxy Socket
-    ret, sock_out, _ = run_cmd_status(["systemctl", "is-active", "airlock-proxy.socket"], host=host)
+    proxy_unit = f"{vm_name}-p{ext_port}-proxy.socket"
+    ret, sock_out, _ = run_cmd_status(["systemctl", "is-active", proxy_unit], host=host)
+    if ret != 0 or sock_out != "active":
+        ret, sock_out, _ = run_cmd_status(["systemctl", "is-active", "airlock-proxy.socket"], host=host)
     proxy_status = "ACTIVE" if sock_out == "active" else "INACTIVE"
     print(f"\n[*] Hypervisor Forwarder: {proxy_status} (http://{host}:{ext_port}/)")
 
