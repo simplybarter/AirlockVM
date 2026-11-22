@@ -8,12 +8,9 @@ listening socket conflicts, storage pool headroom, and host RAM pressure.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-import re
 import shlex
 from typing import Any
-import yaml
 
 from airlock.inventory import find_vm_yaml, get_primary_inventory_dir
 from airlock.ports import get_hypervisor_live_ports

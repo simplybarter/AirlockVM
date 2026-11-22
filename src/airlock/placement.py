@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-import yaml
 
 from airlock.inventory import find_vmhost_yaml, get_inventory_search_dirs, get_primary_inventory_dir
 from airlock.transport import run_host_cmd

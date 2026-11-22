@@ -42,3 +42,10 @@ jobs:
             exit 1
           fi
           echo "Portability check passed."
+
+      - name: Wheel build and isolated install smoke test
+        run: |
+          python -m pip wheel --no-deps -w /tmp/airlock-wheel .
+          python -m venv /tmp/airlock-smoke-venv
+          /tmp/airlock-smoke-venv/bin/pip install /tmp/airlock-wheel/airlockvm-*.whl
+          /tmp/airlock-smoke-venv/bin/airlock ping

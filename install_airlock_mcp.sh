@@ -17,7 +17,7 @@ AIRLOCK_ROOT="$SCRIPT_DIR"
 INSTALL_MODE="tool"
 EDITABLE=false
 FORCE=false
-PYTHON_TARGET="3.14"
+PYTHON_TARGET=""
 UNINSTALL=false
 RUN_CONNECT=false
 
@@ -31,7 +31,7 @@ Usage:
 Options:
   -e, --editable       Install in editable mode (source modifications take effect immediately)
   -f, --force          Force re-installation / overwrite existing install
-  -p, --python <ver>   Specify Python version (default: 3.14)
+  -p, --python <ver>   Specify Python version (default: auto-detect Python >=3.11)
   -c, --connect        Immediately configure IDE agent connectors via ./connect_airlock.sh --all
       --uninstall      Uninstall airlock and airlock-mcp from user environment
   -h, --help           Show this help message

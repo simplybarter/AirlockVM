@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import datetime
 import getpass
-import os
 from pathlib import Path
 import re
 import subprocess
@@ -25,20 +24,19 @@ from airlock.drift import audit_vm_drift, reconcile_vm_drift
 from airlock.health import verify_route_health
 from airlock.inventory import (
     find_vm_yaml,
-    find_vmhost_yaml,
     format_config_path,
     get_inventory_search_dirs,
     get_primary_inventory_dir,
     list_inventory_hosts,
 )
 from airlock.network import allocate_vm_network
-from airlock.placement import inspect_hypervisor, select_optimal_hypervisor
-from airlock.ports import allocate_external_port, get_inventory_used_ports, get_hypervisor_live_ports
+from airlock.placement import select_optimal_hypervisor
+from airlock.ports import allocate_external_port
 from airlock.preflight import validate_deployment_preflight
 from airlock.profiler import profile_workload
 from airlock.security import audit_vm_security
 from airlock.snapshots import create_pre_deploy_checkpoint, rollback_checkpoint
-from airlock.transport import get_python_bin, resolve_asset_path, resolve_sync_dispatcher, validate_identifier
+from airlock.transport import get_python_bin, resolve_asset_path, resolve_sync_dispatcher
 
 # AirlockVM canonical root directory and script resolution
 AIRLOCK_ROOT = Path(__file__).resolve().parents[3]

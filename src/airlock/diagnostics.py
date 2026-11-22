@@ -8,10 +8,8 @@ and hypervisor proxy forwarders to offer automated remediation and disaster roll
 from __future__ import annotations
 
 from pathlib import Path
-import re
 import shlex
 from typing import Any
-import yaml
 
 from airlock.inventory import find_vm_yaml, get_primary_inventory_dir
 from airlock.transport import run_guest_cmd, run_host_cmd

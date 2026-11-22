@@ -9,7 +9,6 @@ from __future__ import annotations
 import http.client
 import time
 from typing import Any
-import urllib.parse
 
 from airlock.transport import run_guest_cmd
 

@@ -12,7 +12,6 @@ import shlex
 import subprocess
 from typing import Any
 import xml.etree.ElementTree as ET
-import yaml
 
 from airlock.inventory import find_vm_yaml, get_primary_inventory_dir
 from airlock.transport import get_python_bin, resolve_asset_path, run_host_cmd

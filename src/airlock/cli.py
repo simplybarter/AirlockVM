@@ -10,7 +10,6 @@ import argparse
 from pathlib import Path
 import subprocess
 import sys
-from typing import Any
 
 from airlock.mcp.server import (
     airlock_audit_drift,

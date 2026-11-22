@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
-from typing import Any
 import yaml
 
 from airlock.inventory import get_inventory_search_dirs, get_primary_inventory_dir

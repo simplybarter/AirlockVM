@@ -12,7 +12,6 @@ from pathlib import Path
 import shlex
 import subprocess
 from typing import Any
-import yaml
 
 from airlock.inventory import find_vm_yaml, get_primary_inventory_dir
 from airlock.transport import run_guest_cmd
