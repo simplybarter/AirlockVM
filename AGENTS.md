@@ -93,6 +93,8 @@ The Model Context Protocol control plane exposes a complete tool suite for codin
    * `airlock_preflight(vm_name)`: Executes 8 pre-requisite safety gates before provisioning (verdict: `READY_TO_DEPLOY` or `BLOCKED`).
    * `airlock_deploy_vm(vm_name, dry_run)`: Provisions KVM domains, disk pools, cloud-init images, and host proxies.
    * `airlock_deploy_app(vm_name, offline)`: Rsyncs application code and launches workloads inside the VM.
+   * `airlock_exec(vm_name, command, workdir, timeout)`: Executes build, test, or diagnostic shell commands inside the isolated guest VM.
+   * `airlock_bake_image(vmhost, force, dry_run)`: Pre-bakes a golden Ubuntu 24.04 `qcow2` base image on the hypervisor for fast-boot VM cloning.
    * `airlock_audit_drift(vm_name)`: Compares live hypervisor state against the `vm.yaml` SSOT to identify domain, network, or proxy drift.
    * `airlock_diagnose(vm_name)`: Performs root-cause failure analysis on stalled workloads and recommends rollbacks.
    * `airlock_audit_security(vm_name, app_name)`: Audits for credential leaks (`.env` vs `.env.local`), sensitive key leakage, and host socket leakage.
