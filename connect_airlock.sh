@@ -178,7 +178,7 @@ done
 if [[ ! -x "$AIRLOCK_MCP_BIN" && ! -f "$AIRLOCK_MCP_BIN" && ! -f "$AIRLOCK_PYTHON" ]]; then
   echo "Error: AirlockVM MCP server binary not found at ${AIRLOCK_MCP_BIN} or ${AIRLOCK_ROOT}/.venv" >&2
   echo "Please install it first:" >&2
-  echo "  ./install_mcp_server.sh" >&2
+  echo "  ./install_airlock_mcp.sh" >&2
   exit 1
 fi
 

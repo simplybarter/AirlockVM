@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# AirlockVM: MCP Server Installer (install_mcp_server.sh)
+# AirlockVM: MCP Server Installer (install_airlock_mcp.sh)
 #
 # Installs 'airlock' and 'airlock-mcp' into the standard user tool location
 # (~/.local/bin/) in an isolated environment using uv, pipx, or standard venv.
@@ -26,7 +26,7 @@ show_help() {
 AirlockVM: MCP Server Installer
 
 Usage:
-  ./install_mcp_server.sh [OPTIONS]
+  ./install_airlock_mcp.sh [OPTIONS]
 
 Options:
   -e, --editable       Install in editable mode (source modifications take effect immediately)
@@ -41,9 +41,9 @@ Standard Installation Target:
   Isolated runtime:    ~/.local/share/uv/tools/airlockvm (or pipx / user venv)
 
 Example:
-  ./install_mcp_server.sh                # Standard isolated install
-  ./install_mcp_server.sh --editable     # Contributor/development mode
-  ./install_mcp_server.sh --connect      # Install and wire up all IDEs
+  ./install_airlock_mcp.sh                # Standard isolated install
+  ./install_airlock_mcp.sh --editable     # Contributor/development mode
+  ./install_airlock_mcp.sh --connect      # Install and wire up all IDEs
 EOF
 }
 

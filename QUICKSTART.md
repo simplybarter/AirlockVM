@@ -28,7 +28,7 @@ git clone https://github.com/simplybarter/AirlockVM.git
 cd AirlockVM
 
 # Install the airlock CLI and airlock-mcp server into ~/.local/bin/:
-./install_mcp_server.sh
+./install_airlock_mcp.sh
 ```
 
 Verify that the control plane is online:

@@ -148,13 +148,13 @@ Installs `airlock` and `airlock-mcp` into an isolated user tool environment via 
 
 ```bash
 # Standard isolated installation:
-./install_mcp_server.sh
+./install_airlock_mcp.sh
 
 # Or install in editable mode for active development:
-./install_mcp_server.sh --editable
+./install_airlock_mcp.sh --editable
 
 # Install and automatically configure all IDE agent connectors:
-./install_mcp_server.sh --connect
+./install_airlock_mcp.sh --connect
 ```
 
 #### Option 2: Local Repository Virtual Environment
