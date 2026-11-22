@@ -106,6 +106,8 @@ The MCP server exposes standard, declarative tools enabling agents to inspect, d
 | `airlock_preflight` | `vm_name: str` | Non-destructive pre-flight deployability confirmation: live probe of SSH/sudo, /dev/kvm, libvirtd, IP silence, port conflicts, disk headroom, and host RAM safety. Returns verdict (`READY_TO_DEPLOY` / `BLOCKED`) with confidence score. |
 | `airlock_deploy_vm` | `vm_name: str`<br/>`dry_run: bool = False` | Enforces pre-flight capability checks and provisions/updates the VM domain: SSH key generation, static DHCP reservations on `virbr0`, cloud-init NoCloud ISO seeding, `virt-install`, and hypervisor `systemd-socket-proxyd` forwarders for all mapped repository ports. |
 | `airlock_deploy_app` | `vm_name: str`<br/>`app_name: str = ""` <br/>`dry_run: bool = False`<br/>`no_restart: bool = False`<br/>`offline: bool = False`<br/>`checkpoint: bool = False`<br/>`verify_health: bool = False` | Synchronizes application source code to the target VM using `deploy_app_to_airlock.sh`. Optionally creates safety snapshot checkpoints and verifies HTTP route health post-deploy. |
+| `airlock_exec` | `vm_name: str`<br/>`command: str`<br/>`workdir: str = ""` <br/>`timeout: int = 120` | Executes build, test, or diagnostic shell commands inside the isolated guest VM over SSH using base64-safe transport and bounded timeouts. |
+| `airlock_bake_image` | `vmhost: str = "localhost"`<br/>`force: bool = False`<br/>`dry_run: bool = False` | Pre-bakes a golden Ubuntu 24.04 `qcow2` base image (with Docker, Node.js, Python, and QEMU Guest Agent pre-installed) so new VMs skip cloud-init package downloads and boot to SSH in seconds. |
 
 ---
 

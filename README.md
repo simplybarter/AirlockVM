@@ -181,6 +181,12 @@ airlock deploy --vm <vm-name>
 # Push application files to the VM:
 airlock sync <vm-name>
 
+# Run tests or build commands inside the isolated VM:
+airlock exec <vm-name> -- pytest -q
+
+# Pre-bake a golden base image on a hypervisor for ~10-15s VM spin-up:
+airlock bake-image localhost
+
 # Connect via SSH or open in remote IDE (VS Code / Cursor):
 airlock connect <vm-name> --ide vscode
 
