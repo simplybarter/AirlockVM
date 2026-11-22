@@ -1,4 +1,4 @@
-"""DevBox Self-Healing Crash Diagnostic Engine.
+"""AirlockVM Self-Healing Crash Diagnostic Engine.
 
 Performs multi-layer root-cause failure analysis when workloads fail health checks or crash.
 Analyzes guest systemd logs, runtime process exit codes, internal listening sockets,
@@ -13,8 +13,8 @@ import subprocess
 from typing import Any
 import yaml
 
-DEVBOX_ROOT = Path(__file__).resolve().parents[2]
-INVENTORY_DIR = DEVBOX_ROOT / "inventory"
+AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
+INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
 
 
 def _ssh_guest(vm_name: str, cmd: str, timeout: int = 5) -> tuple[int, str, str]:

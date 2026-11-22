@@ -58,14 +58,14 @@ flowchart TD
   ```
 * **Success Criteria**:
   - Creates `<client-project>/.gemini/mcp_config.json`.
-  - Configures the `devbox` MCP server pointing to AirlockVM's Python virtual environment (`.venv/bin/airlock-mcp`).
+  - Configures the `airlock` MCP server pointing to AirlockVM's Python virtual environment (`.venv/bin/airlock-mcp`).
 
 ---
 
 ### Phase 2: Topology Decision & VM Registration
 
 AirlockVM supports two deployment models established via conversation between the user, agent, and MCP server:
-* **Option A: Dedicated VM (`airlock_create_vm`)** *(Selected for DummyAirlockVMApp)*: Creates an isolated, dedicated virtual machine domain (`dummydevboxapp-vm`) with dedicated static IP, MAC, SSH keys, runbook (`VM.md`), and systemd proxy forwarders.
+* **Option A: Dedicated VM (`airlock_create_vm`)** *(Selected for DummyAirlockVMApp)*: Creates an isolated, dedicated virtual machine domain (`dummyairlockapp-vm`) with dedicated static IP, MAC, SSH keys, runbook (`VM.md`), and systemd proxy forwarders.
 * **Option B: Attach to Existing VM (`airlock_attach_app`)**: Attaches the project to a shared development or staging worker (e.g. `airlock-vm`).
 
 #### Executing Phase 2A: Dedicated VM Creation (`airlock_create_vm`)
@@ -79,14 +79,14 @@ AirlockVM supports two deployment models established via conversation between th
   - Automatically inspects `package.json` to detect Node.js, internal port 3000, and `npm start`.
   - Automatically allocates the next clean static IP (e.g. `192.168.122.238`) and collision-free MAC on `virbr0`.
   - Automatically allocates a clean external forwarder port on hypervisor `barkley`.
-  - Generates `inventory/barkley/dummy-devbox-app-vm/vm.yaml` (SSOT).
-  - Generates parameterized operational runbook `inventory/barkley/dummy-devbox-app-vm/VM.md`.
-  - Generates `inventory/barkley/dummy-devbox-app-vm/deploy_app_to_vm.sh` and registers with root dispatcher.
+  - Generates `inventory/barkley/dummy-airlock-app-vm/vm.yaml` (SSOT).
+  - Generates parameterized operational runbook `inventory/barkley/dummy-airlock-app-vm/VM.md`.
+  - Generates `inventory/barkley/dummy-airlock-app-vm/deploy_app_to_vm.sh` and registers with root dispatcher.
 
 ---
 
 ### Phase 2.5: Pre-Flight Deployability Confirmation (`airlock_preflight`)
-* **Action**: Invoke the MCP tool `airlock_preflight(vm_name="dummy-devbox-app-vm")`:
+* **Action**: Invoke the MCP tool `airlock_preflight(vm_name="dummy-airlock-app-vm")`:
 * **Success Criteria**:
   - Live probe confirms SSH connectivity, `/dev/kvm` acceleration, and `virsh` responsiveness.
   - Verifies target static IP (`192.168.122.231`) is completely silent (no ARP/ICMP collision).
@@ -97,18 +97,18 @@ AirlockVM supports two deployment models established via conversation between th
 ---
 
 ### Phase 3: Hypervisor Proxy Provisioning (`airlock_deploy_vm`)
-* **Action**: Invoke the MCP tool `airlock_deploy_vm(vm_name="dummy-devbox-app-vm", dry_run=True)`:
+* **Action**: Invoke the MCP tool `airlock_deploy_vm(vm_name="dummy-airlock-app-vm", dry_run=True)`:
 * **Success Criteria**:
   - Validates pre-flight hypervisor health and VM specification via prerequisite gates.
-  - Provisions the systemd socket unit `/etc/systemd/system/dummy-devbox-app-vm-p3002-proxy.socket` and corresponding proxy service on the hypervisor host.
+  - Provisions the systemd socket unit `/etc/systemd/system/dummy-airlock-app-vm-p3002-proxy.socket` and corresponding proxy service on the hypervisor host.
   - Hypervisor listens on proxy external port forwarding to guest IP:3000.
 
 ---
 
 ### Phase 4: Application Deployment & Post-Deploy (`airlock_deploy_app`)
-* **Action**: Invoke the MCP tool `airlock_deploy_app(vm_name="dummy-devbox-app-vm")`:
+* **Action**: Invoke the MCP tool `airlock_deploy_app(vm_name="dummy-airlock-app-vm")`:
 * **Success Criteria**:
-  - Rsync pushes `server.js` and `package.json` to `~/dummy-devbox-app` on the guest VM.
+  - Rsync pushes `server.js` and `package.json` to `~/dummy-airlock-app` on the guest VM.
   - Excluded paths (`.git/`, caches, temp files) are omitted.
   - Injects `HOST=0.0.0.0` and `PORT=3000` into `post_deploy`.
   - Service launches in the guest VM execution context.

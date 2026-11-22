@@ -1,4 +1,4 @@
-"""DevBox Intelligent Port Allocation Engine.
+"""AirlockVM Intelligent Port Allocation Engine.
 
 Scans inventory SSOT and queries target hypervisors over SSH to detect
 occupied ports and allocate conflict-free external forwarding ports.
@@ -12,8 +12,8 @@ import subprocess
 from typing import Any
 import yaml
 
-DEVBOX_ROOT = Path(__file__).resolve().parents[2]
-INVENTORY_DIR = DEVBOX_ROOT / "inventory"
+AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
+INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
 
 
 def get_inventory_used_ports(

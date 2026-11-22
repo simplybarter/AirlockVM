@@ -1,4 +1,4 @@
-"""DevBox Security & Isolation Boundary Audit Engine.
+"""AirlockVM Security & Isolation Boundary Audit Engine.
 
 Enforces zero-workload workstation invariants and sandboxing guardrails:
 1. Verifies zero credentials, private keys, or .git trees leaked onto the guest VM.
@@ -13,8 +13,8 @@ import subprocess
 from typing import Any
 import yaml
 
-DEVBOX_ROOT = Path(__file__).resolve().parents[2]
-INVENTORY_DIR = DEVBOX_ROOT / "inventory"
+AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
+INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
 
 
 def _ssh_guest(vm_name: str, cmd: str, timeout: int = 5) -> tuple[int, str, str]:

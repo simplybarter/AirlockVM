@@ -1,4 +1,4 @@
-"""DevBox Multi-Hypervisor Host Placement Optimizer.
+"""AirlockVM Multi-Hypervisor Host Placement Optimizer.
 
 Audits hypervisor resources (CPU threads, RAM headroom, storage, running VMs)
 to automatically recommend or select the optimal hypervisor host for new VMs or workloads.
@@ -11,8 +11,8 @@ import subprocess
 from typing import Any
 import yaml
 
-DEVBOX_ROOT = Path(__file__).resolve().parents[2]
-INVENTORY_DIR = DEVBOX_ROOT / "inventory"
+AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
+INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
 
 
 def inspect_hypervisor(vmhost: str) -> dict[str, Any]:

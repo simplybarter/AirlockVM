@@ -1,4 +1,4 @@
-"""DevBox Smart Static IP & MAC Auto-Allocator.
+"""AirlockVM Smart Static IP & MAC Auto-Allocator.
 
 Audits inventory network topologies and reservations to assign conflict-free
 static IP addresses and randomized collision-free MAC addresses on virbr0 bridges.
@@ -12,8 +12,8 @@ import random
 from typing import Any
 import yaml
 
-DEVBOX_ROOT = Path(__file__).resolve().parents[2]
-INVENTORY_DIR = DEVBOX_ROOT / "inventory"
+AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
+INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
 
 
 def allocate_vm_network(

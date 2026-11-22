@@ -1,1 +1,1 @@
-"""DevBox MCP module."""
+"""AirlockVM MCP module."""

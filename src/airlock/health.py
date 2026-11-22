@@ -1,4 +1,4 @@
-"""DevBox Post-Deploy Health Verification & Diagnostic Engine.
+"""AirlockVM Post-Deploy Health Verification & Diagnostic Engine.
 
 Probes hypervisor proxy routes to confirm application availability and automatically
 captures runtime crash logs from the guest VM if deployment fails.

@@ -119,7 +119,7 @@ To enable AirlockVM tools in any project or globally in Antigravity / Claude Cod
 ```json
 {
   "mcpServers": {
-    "devbox": {
+    "airlock": {
       "command": "/path/to/AirlockVM/.venv/bin/airlock-mcp"
     }
   }
@@ -131,7 +131,7 @@ Or using direct Python execution:
 ```json
 {
   "mcpServers": {
-    "devbox": {
+    "airlock": {
       "command": "/path/to/AirlockVM/.venv/bin/python",
       "args": ["-m", "airlock.mcp.server"]
     }

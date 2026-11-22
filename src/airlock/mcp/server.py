@@ -114,7 +114,7 @@ def _find_vm_yaml(vm_name: str) -> tuple[Path | None, dict[str, Any] | None]:
 
 @server.tool()
 def airlock_ping() -> str:
-    """Health check verifying that DevBox MCP server and Python runtime are responsive."""
+    """Health check verifying that AirlockVM MCP server and Python runtime are responsive."""
     return f"AirlockVM MCP Server is online (Python {sys.version.split()[0]} | {AIRLOCK_ROOT})"
 
 
@@ -629,9 +629,9 @@ def airlock_attach_app(
     """Registers or updates an application repository in inventory/{vmhost}/{vm}/vm.yaml and regenerates sync scripts.
 
     Intelligent zero-config defaults:
-    - If app_name, internal_port, or post_deploy are omitted/0/"", DevBox automatically
+    - If app_name, internal_port, or post_deploy are omitted/0/"", AirlockVM automatically
       inspects the local project files to infer the stack, port, and startup commands.
-    - If external_port is 0 or omitted, DevBox audits the hypervisor to allocate the next
+    - If external_port is 0 or omitted, AirlockVM audits the hypervisor to allocate the next
       conflict-free port automatically.
 
     Args:
@@ -870,165 +870,8 @@ def airlock_snapshot(vm_name: str, action: str, snapshot_name: str = "") -> dict
     return res
 
 
-
-
-# ==============================================================================
-# Backward-Compatibility Aliases (devbox_* -> airlock_*)
-# ==============================================================================
-
-@server.tool()
-def devbox_ping() -> str:
-    """[Deprecated: use airlock_ping] Health check verifying that AirlockVM MCP server is online."""
-    return airlock_ping()
-
-@server.tool()
-def devbox_list() -> dict[str, Any]:
-    """[Deprecated: use airlock_list] Lists all registered hypervisors and VMs in inventory."""
-    return airlock_list()
-
-@server.tool()
-def devbox_status(vm_name: str) -> dict[str, Any]:
-    """[Deprecated: use airlock_status] Queries live status of a target VM."""
-    return airlock_status(vm_name)
-
-@server.tool()
-def devbox_detect_app(local_path: str) -> dict[str, Any]:
-    """[Deprecated: use airlock_detect_app] Inspects a local application directory."""
-    return airlock_detect_app(local_path)
-
-@server.tool()
-def devbox_find_port(
-    vm_name: str = "",
-    internal_port: int = 3000,
-    preferred_port: int = 0,
-    vmhost: str = "",
-) -> dict[str, Any]:
-    """[Deprecated: use airlock_find_port] Discovers the next available external port."""
-    return airlock_find_port(vm_name, internal_port, preferred_port, vmhost)
-
-@server.tool()
-def devbox_alloc_network(vmhost: str = "", network_name: str = "default") -> dict[str, Any]:
-    """[Deprecated: use airlock_alloc_network] Discovers next available static IP and unique MAC address."""
-    return airlock_alloc_network(vmhost, network_name)
-
-@server.tool()
-def devbox_select_host(
-    required_memory_mib: int = 2048,
-    required_disk_gib: int = 50,
-    preferred_host: str = "",
-) -> dict[str, Any]:
-    """[Deprecated: use airlock_select_host] Evaluates hypervisors and selects optimal placement."""
-    return airlock_select_host(required_memory_mib, required_disk_gib, preferred_host)
-
-@server.tool()
-def devbox_health_check(
-    vm_name: str,
-    app_name: str = "",
-    path: str = "/",
-    timeout: int = 5,
-    retries: int = 1,
-) -> dict[str, Any]:
-    """[Deprecated: use airlock_health_check] Verifies HTTP route health."""
-    return airlock_health_check(vm_name, app_name, path, timeout, retries)
-
-@server.tool()
-def devbox_diagnose(vm_name: str, app_name: str = "") -> dict[str, Any]:
-    """[Deprecated: use airlock_diagnose] Multi-layer crash diagnosis."""
-    return airlock_diagnose(vm_name, app_name)
-
-@server.tool()
-def devbox_checkpoint(
-    vm_name: str,
-    action: str = "create",
-    snapshot_name: str = "",
-    tag_prefix: str = "snap-pre-deploy",
-) -> dict[str, Any]:
-    """[Deprecated: use airlock_checkpoint] Creates pre-deployment checkpoints or rollbacks."""
-    return airlock_checkpoint(vm_name, action, snapshot_name, tag_prefix)
-
-@server.tool()
-def devbox_audit_drift(vm_name: str) -> dict[str, Any]:
-    """[Deprecated: use airlock_audit_drift] Detects drift between hypervisor and inventory."""
-    return airlock_audit_drift(vm_name)
-
-@server.tool()
-def devbox_reconcile(vm_name: str, strategy: str = "refresh_inventory") -> dict[str, Any]:
-    """[Deprecated: use airlock_reconcile] Reconciles drift between hypervisor and inventory."""
-    return airlock_reconcile(vm_name, strategy)
-
-@server.tool()
-def devbox_profile_workload(vm_name: str, duration_sec: int = 2) -> dict[str, Any]:
-    """[Deprecated: use airlock_profile_workload] Profiles guest resources and rightsizing."""
-    return airlock_profile_workload(vm_name, duration_sec)
-
-@server.tool()
-def devbox_audit_security(vm_name: str, app_name: str = "") -> dict[str, Any]:
-    """[Deprecated: use airlock_audit_security] Audits secret leaks and workstation isolation."""
-    return airlock_audit_security(vm_name, app_name)
-
-@server.tool()
-def devbox_create_vm(
-    local_path: str,
-    vmhost: str = "",
-    vm_name: str = "",
-    app_name: str = "",
-    internal_port: int = 0,
-    external_port: int = 0,
-    post_deploy: str = "",
-    vcpu: int = 4,
-    memory_mib: int = 2048,
-    disk_gib: int = 50,
-) -> dict[str, Any]:
-    """[Deprecated: use airlock_create_vm] Generates dedicated execution VM runbook and specification."""
-    return airlock_create_vm(local_path, vmhost, vm_name, app_name, internal_port, external_port, post_deploy, vcpu, memory_mib, disk_gib)
-
-@server.tool()
-def devbox_attach_app(
-    local_path: str,
-    vm_name: str,
-    app_name: str = "",
-    internal_port: int = 0,
-    external_port: int = 0,
-    post_deploy: str = "",
-) -> dict[str, Any]:
-    """[Deprecated: use airlock_attach_app] Attaches application to shared VM worker."""
-    return airlock_attach_app(local_path, vm_name, app_name, internal_port, external_port, post_deploy)
-
-@server.tool()
-def devbox_preflight(vm_name: str) -> dict[str, Any]:
-    """[Deprecated: use airlock_preflight] Validates pre-flight deployability."""
-    return airlock_preflight(vm_name)
-
-@server.tool()
-def devbox_deploy_vm(vm_name: str, dry_run: bool = False) -> dict[str, Any]:
-    """[Deprecated: use airlock_deploy_vm] Deploys VM domain."""
-    return airlock_deploy_vm(vm_name, dry_run)
-
-@server.tool()
-def devbox_deploy_app(
-    local_path: str,
-    vm_name: str = "",
-    app_name: str = "",
-    dry_run: bool = False,
-    delete_extraneous: bool = False,
-    post_deploy: str = "",
-) -> dict[str, Any]:
-    """[Deprecated: use airlock_deploy_app] Synchronizes code to VM."""
-    return airlock_deploy_app(local_path, vm_name, app_name, dry_run, delete_extraneous, post_deploy)
-
-@server.tool()
-def devbox_power(vm_name: str, action: str) -> dict[str, Any]:
-    """[Deprecated: use airlock_power] Powers on/off VM domain."""
-    return airlock_power(vm_name, action)
-
-@server.tool()
-def devbox_snapshot(vm_name: str, action: str, snapshot_name: str = "") -> dict[str, Any]:
-    """[Deprecated: use airlock_snapshot] Manages disk snapshots."""
-    return airlock_snapshot(vm_name, action, snapshot_name)
-
-
 def main() -> None:
-    """Runs the DevBox MCP Server over stdio."""
+    """Runs the AirlockVM MCP Server over stdio."""
     server.run()
 
 

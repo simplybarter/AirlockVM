@@ -1,4 +1,4 @@
-"""DevBox Application Stack & Manifest Detection Engine.
+"""AirlockVM Application Stack & Manifest Detection Engine.
 
 Automatically inspects project directories to infer application name, framework,
 internal listening port, and post-deploy lifecycle commands.

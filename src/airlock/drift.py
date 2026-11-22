@@ -189,7 +189,7 @@ def reconcile_vm_drift(vm_name: str, strategy: str = "refresh_inventory") -> dic
 
     if strategy == "refresh_inventory":
         cmd = ["python3", str(ADD_HOST_SCRIPT), vmhost, "--vm", vm_name]
-        proc = subprocess.run(cmd, cwd=DEVBOX_ROOT, capture_output=True, text=True)
+        proc = subprocess.run(cmd, cwd=AIRLOCK_ROOT, capture_output=True, text=True)
         return {
             "success": proc.returncode == 0,
             "strategy": strategy,
@@ -200,7 +200,7 @@ def reconcile_vm_drift(vm_name: str, strategy: str = "refresh_inventory") -> dic
         }
     elif strategy == "enforce_specification":
         cmd = ["python3", str(DEPLOY_SCRIPT), "--vm", vm_name, "--yes"]
-        proc = subprocess.run(cmd, cwd=DEVBOX_ROOT, capture_output=True, text=True)
+        proc = subprocess.run(cmd, cwd=AIRLOCK_ROOT, capture_output=True, text=True)
         return {
             "success": proc.returncode == 0,
             "strategy": strategy,

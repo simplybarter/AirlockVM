@@ -1,4 +1,4 @@
-"""DevBox Workload Profiling & Rightsizing Optimization Engine.
+"""AirlockVM Workload Profiling & Rightsizing Optimization Engine.
 
 Connects to guest virtual machines to measure real-time CPU, RAM, swap, and process load,
 and computes actionable rightsizing recommendations to optimize hypervisor resource utilization.
@@ -13,8 +13,8 @@ import time
 from typing import Any
 import yaml
 
-DEVBOX_ROOT = Path(__file__).resolve().parents[2]
-INVENTORY_DIR = DEVBOX_ROOT / "inventory"
+AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
+INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
 
 
 def _ssh_guest(vm_name: str, cmd: str, timeout: int = 5) -> tuple[int, str, str]:

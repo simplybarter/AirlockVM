@@ -17,7 +17,6 @@ dependencies = [
 [project.scripts]
 airlock = "airlock.cli:main"
 airlock-mcp = "airlock.mcp.server:main"
-devbox-mcp = "airlock.mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/airlock"]
