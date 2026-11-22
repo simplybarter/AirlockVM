@@ -49,11 +49,14 @@ AirlockVM MCP Server is online (Python 3.14.x | ...)
 You do not need to edit complex JSON files manually. AirlockVM includes a multi-IDE client connector that wires up your AI agent in one command:
 
 ```bash
-# Connect globally for all projects:
-./connect_airlock.sh --global
+# Connect the current client project workspace:
+./connect_airlock.sh
 
 # OR connect a specific client project:
 ./connect_airlock.sh --target ../my-web-app
+
+# OR connect globally across all projects for your user:
+./connect_airlock.sh --global
 ```
 
 *Supported Environments:*

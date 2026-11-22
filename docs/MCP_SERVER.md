@@ -147,11 +147,17 @@ AirlockVM provides a helper script (`connect_airlock.sh`) to automatically regis
 * **Supported Platforms**: VS Code (`.vscode/mcp.json`), Antigravity / Gemini (`.gemini/mcp_config.json`), Cursor (`.cursor/mcp.json`), Claude (`.mcp.json` / `claude_desktop_config.json`), Windsurf (`.codeium/windsurf/mcp_config.json`), JetBrains (`.idea/mcp.json`), and universal root `.mcp.json`.
 
 ```bash
-# Connect all detected IDEs in a project workspace:
+# Connect the current client project workspace (with interactive confirmation):
+./connect_airlock.sh
+
+# Connect all detected IDEs in a specific project workspace:
 ./connect_airlock.sh --target /path/to/AppSurfer --all
 
 # Connect specific IDEs (e.g. VS Code & Antigravity):
 ./connect_airlock.sh --target /path/to/AppSurfer --vscode --antigravity
+
+# Auto-approve without interactive prompt (useful in CI / automation):
+./connect_airlock.sh --target /path/to/AppSurfer --yes
 
 # Connect globally for the current user across all installed IDEs:
 ./connect_airlock.sh --global --all

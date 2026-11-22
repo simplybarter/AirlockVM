@@ -389,6 +389,46 @@ class TestPermutationH_ClientConnectorCLI(unittest.TestCase):
         self.assertIn("Cursor", proc.stdout)
         self.assertNotIn("JetBrains", proc.stdout)
 
+    def test_connector_abort_on_confirmation_reject(self):
+        proc = subprocess.run(
+            ["./connect_airlock.sh", "--target", str(DUMMY_APP_DIR)],
+            input="n\n",
+            cwd=str(AIRLOCK_ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Target Location:", proc.stdout)
+        self.assertIn("Aborted by user.", proc.stdout)
+
+    def test_connector_with_auto_yes(self):
+        proc = subprocess.run(
+            ["./connect_airlock.sh", "--target", str(DUMMY_APP_DIR), "-y", "--antigravity"],
+            cwd=str(AIRLOCK_ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Target Location:", proc.stdout)
+        self.assertIn("Completed. Total configs updated:", proc.stdout)
+
+    def test_connector_default_target_directory(self):
+        proc = subprocess.run(
+            [str(AIRLOCK_ROOT / "connect_airlock.sh"), "--dry-run", "--cursor"],
+            cwd=str(DUMMY_APP_DIR),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Target Location:", proc.stdout)
+        self.assertIn(str(DUMMY_APP_DIR), proc.stdout)
+
 
 class TestPermutationI_LiveDeploymentAndProxyReachability(unittest.TestCase):
     """Permutation I: End-to-end live deployment and hypervisor proxy reachability verification."""

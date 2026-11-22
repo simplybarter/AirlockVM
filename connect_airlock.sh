@@ -35,7 +35,23 @@ MODE="target"
 TARGET_DIR=""
 ACTION="add"
 DRY_RUN=false
+AUTO_YES=false
 PLATFORMS=()
+
+# Terminal color codes for target highlighting
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  BOLD='\033[1m'
+  CYAN='\033[1;36m'
+  GREEN='\033[1;32m'
+  YELLOW='\033[1;33m'
+  RESET='\033[0m'
+else
+  BOLD=''
+  CYAN=''
+  GREEN=''
+  YELLOW=''
+  RESET=''
+fi
 
 show_help() {
   cat <<EOF
@@ -45,7 +61,7 @@ Usage:
   ./connect_airlock.sh [MODE] [PLATFORMS...] [OPTIONS]
 
 Modes:
-  -t, --target <path>     Register into a specific project workspace
+  -t, --target <path>     Register into a specific project workspace (default: current directory '.')
   -g, --global            Register globally into user home configs
   -l, --list              Inspect current AirlockVM registrations across all platforms
 
@@ -60,12 +76,16 @@ Platform Selectors (default: --all):
       --universal         Standard root-level .mcp.json (Neovim, CLI tools)
 
 Options:
+  -y, --yes               Automatic yes to confirmation prompt (non-interactive)
   -r, --remove            Remove AirlockVM MCP registration
   -d, --dry-run           Preview configuration updates without modifying disk
   -h, --help              Show this help message
 
 Examples:
-  # Connect all detected IDEs in a project workspace:
+  # Connect all detected IDEs in the current project:
+  ./connect_airlock.sh
+
+  # Connect all detected IDEs in a specific project workspace:
   ./connect_airlock.sh --target /path/to/my-app --all
 
   # Connect VS Code and Antigravity globally for the current user:
@@ -130,6 +150,10 @@ while [[ $# -gt 0 ]]; do
       PLATFORMS+=("universal")
       shift
       ;;
+    -y|--yes)
+      AUTO_YES=true
+      shift
+      ;;
     -r|--remove|--uninstall)
       ACTION="remove"
       shift
@@ -182,12 +206,14 @@ for p in "${PLATFORMS[@]}"; do
   fi
 done
 
-# Resolve Target Path if target mode
+# Resolve Target Path if target mode (defaults to current directory '.' if unspecified)
 TARGET_ROOT=""
 if [[ "$MODE" == "target" && "$ACTION" != "list" ]]; then
   if [[ -z "$TARGET_DIR" ]]; then
-    echo "Error: --target <path> is required when not using --global or --list" >&2
-    echo "Run with --help for usage details." >&2
+    TARGET_DIR="."
+  fi
+  if [[ ! -d "$TARGET_DIR" ]]; then
+    echo "Error: Target directory does not exist: $TARGET_DIR" >&2
     exit 1
   fi
   TARGET_ROOT="$(cd "$TARGET_DIR" && pwd)"
@@ -264,9 +290,54 @@ if [[ "$ACTION" == "list" ]]; then
   fi
 else
   if [[ "$MODE" == "global" ]]; then
+    TARGET_DISPLAY="Global User Environment (${HOME})"
     resolve_targets "global" "${HOME}"
   else
+    TARGET_DISPLAY="${TARGET_ROOT}"
     resolve_targets "project" "$TARGET_ROOT"
+  fi
+fi
+
+# Pre-execution summary, target highlighting, and interactive confirmation
+if [[ "$ACTION" != "list" ]]; then
+  echo -e "============================================================"
+  echo -e " ${BOLD}AirlockVM Multi-IDE Client Connector${RESET}"
+  echo -e "============================================================"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo -e " Action:           ${BOLD}${YELLOW}${ACTION^^} (DRY-RUN)${RESET}"
+  else
+    echo -e " Action:           ${BOLD}${ACTION^^}${RESET}"
+  fi
+  echo -e " Target Location:  ${BOLD}${CYAN}${TARGET_DISPLAY}${RESET}"
+  echo -e " Command Target:   ${GREEN}${COMMAND_PATH}${RESET}"
+  echo -e " Target Configs:"
+  declare -A seen_preview_paths=()
+  for item in "${CONFIG_TARGETS[@]}"; do
+    IFS="|" read -r label scope path <<< "$item"
+    if [[ -z "${seen_preview_paths["$path"]:-}" ]]; then
+      seen_preview_paths["$path"]=1
+      if [[ "$scope" == "global" && "$ACTION" == "add" && ! -d "$(dirname "$path")" ]]; then
+        echo -e "   • ${label} (${scope}): ${path} [skipped: IDE not installed]"
+      else
+        echo -e "   • ${BOLD}${label}${RESET} (${scope}): ${path}"
+      fi
+    fi
+  done
+  echo -e "============================================================"
+
+  if [[ "$DRY_RUN" != "true" && "$AUTO_YES" != "true" ]]; then
+    if [[ -t 0 ]]; then
+      read -r -p "Apply these configuration changes? [y/N]: " confirm
+    else
+      if ! read -r confirm; then
+        echo -e "${YELLOW}Aborted: Non-interactive execution requires -y/--yes to confirm changes.${RESET}" >&2
+        exit 1
+      fi
+    fi
+    if [[ ! "$confirm" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+      echo "Aborted by user."
+      exit 0
+    fi
   fi
 fi
 
@@ -316,8 +387,10 @@ if action == "list":
         print(f" {status_str} {label:<16} ({scope:<7}) -> {path}")
     sys.exit(0)
 
-print(f"[*] AirlockVM Connector Action: {action.upper()} {'(DRY-RUN)' if dry_run else ''}")
-print(f"[*] Command Target: {command_path}")
+if dry_run:
+    print("[*] Simulating configuration updates (DRY-RUN)...")
+else:
+    print("[*] Applying configuration updates...")
 print("------------------------------------------------------------")
 
 modified_count = 0
