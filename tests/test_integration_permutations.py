@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 import urllib.request
 import yaml
 
@@ -49,6 +50,7 @@ EXISTING_HOSTS = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml")
 REMOTE_HOST = "remotehost" if "remotehost" in EXISTING_HOSTS else (
     next((h for h in EXISTING_HOSTS if h != "localhost"), "remotehost")
 )
+LIVE_TESTS_ENABLED = os.environ.get("AIRLOCK_LIVE_TESTS", "").lower() in ("1", "true", "yes")
 
 
 class TestPermutationA_ObservabilityAndInspection(unittest.TestCase):
@@ -180,6 +182,7 @@ class TestPermutationD_DedicatedVMLifecycle(unittest.TestCase):
         self.assertIn("192.168.122.", content)
         self.assertIn("3002", content)
 
+    @unittest.skipUnless(LIVE_TESTS_ENABLED, "Set AIRLOCK_LIVE_TESTS=1 to run live hypervisor preflight tests")
     def test_preflight_audit_gates_ready(self):
         pf = srv.airlock_preflight("ready-test-vm")
         self.assertTrue(pf.get("success"))
@@ -211,8 +214,14 @@ class TestPermutationE_SharedAttachTopology(unittest.TestCase):
     """Permutation E: Tests shared attach topology, idempotency, and overrides."""
 
     def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._old_inv_env = os.environ.get("AIRLOCK_INVENTORY_DIR")
+        self._tmp_inv = Path(self._tmpdir.name) / "inventory"
+        shutil.copytree(FIXTURE_INVENTORY_DIR, self._tmp_inv)
+        os.environ["AIRLOCK_INVENTORY_DIR"] = str(self._tmp_inv)
+
         self.test_vm = "test-shared-staging-vm"
-        self.test_dir = INVENTORY_DIR / REMOTE_HOST / self.test_vm
+        self.test_dir = self._tmp_inv / REMOTE_HOST / self.test_vm
         self.test_dir.mkdir(parents=True, exist_ok=True)
         self.test_yaml = self.test_dir / "vm.yaml"
         sample_doc = {
@@ -234,15 +243,11 @@ class TestPermutationE_SharedAttachTopology(unittest.TestCase):
             yaml.dump(sample_doc, f)
 
     def tearDown(self):
-        if self.test_dir.exists():
-            shutil.rmtree(self.test_dir)
-        # Regenerate sync script clean
-        subprocess.run(
-            [str(AIRLOCK_ROOT / ".venv/bin/python"), str(AIRLOCK_ROOT / "inventory/generate_deploy_script.py")],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
+        if self._old_inv_env is not None:
+            os.environ["AIRLOCK_INVENTORY_DIR"] = self._old_inv_env
+        else:
+            os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
+        self._tmpdir.cleanup()
 
     def test_attach_app_auto_inference(self):
         res = srv.airlock_attach_app(
@@ -283,14 +288,11 @@ class TestPermutationE_SharedAttachTopology(unittest.TestCase):
         self.assertEqual(len(repos), 1)  # Not duplicated
         self.assertEqual(repos[0]["post_deploy"], "node custom_start.js")
 
-    def tearDown(self):
-        if hasattr(self, "test_dir") and self.test_dir.exists():
-            shutil.rmtree(self.test_dir, ignore_errors=True)
-
 
 class TestPermutationF_DriftAndDiagnostics(unittest.TestCase):
     """Permutation F: Tests drift detection and root-cause diagnostics."""
 
+    @unittest.skipUnless(LIVE_TESTS_ENABLED, "Set AIRLOCK_LIVE_TESTS=1 to run live hypervisor drift tests")
     def test_audit_drift_live_vm(self):
         res = srv.airlock_audit_drift("dummy-airlock-app-vm")
         self.assertTrue(res.get("success"))
@@ -318,7 +320,8 @@ class TestPermutationF_DriftAndDiagnostics(unittest.TestCase):
         self.assertIn("not found in inventory", diag.get("error", ""))
 
     def test_diagnose_powered_off_vm(self):
-        diag = srv.airlock_diagnose("dummy-airlock-app-vm")
+        with patch("airlock.diagnostics._ssh_host", return_value=(0, "shut off", "")):
+            diag = srv.airlock_diagnose("dummy-airlock-app-vm")
         self.assertTrue(diag.get("success"))
         self.assertEqual(diag.get("root_cause"), "VM_POWERED_OFF")
         self.assertTrue("airlock_power" in diag.get("suggested_action", "") or "start" in diag.get("suggested_action", ""))
@@ -336,6 +339,7 @@ class TestPermutationF_DriftAndDiagnostics(unittest.TestCase):
             if tmp_unprov.exists():
                 shutil.rmtree(tmp_unprov)
 
+    @unittest.skipUnless(LIVE_TESTS_ENABLED, "Set AIRLOCK_LIVE_TESTS=1 to run live hypervisor diagnostics tests")
     def test_diagnose_live_running_vm(self):
         diag = srv.airlock_diagnose("dummy-airlock-app-vm")
         self.assertTrue(diag.get("success"))
@@ -348,6 +352,7 @@ class TestPermutationF_DriftAndDiagnostics(unittest.TestCase):
 class TestPermutationG_SecurityIsolation(unittest.TestCase):
     """Permutation G: Verifies zero credential leaks and workstation zero-workload invariant."""
 
+    @unittest.skipUnless(LIVE_TESTS_ENABLED, "Set AIRLOCK_LIVE_TESTS=1 to run live guest security audit")
     def test_security_audit_dummy_vm(self):
         sec = srv.airlock_audit_security("dummy-airlock-app-vm", app_name="dummy-airlock-app")
         self.assertTrue(sec.get("success"))
@@ -470,6 +475,7 @@ class TestPermutationH_ClientConnectorCLI(unittest.TestCase):
         self.assertIn(str(DUMMY_APP_DIR), proc.stdout)
 
 
+@unittest.skipUnless(LIVE_TESTS_ENABLED, "Set AIRLOCK_LIVE_TESTS=1 to run live deployment and proxy reachability tests")
 class TestPermutationI_LiveDeploymentAndProxyReachability(unittest.TestCase):
     """Permutation I: End-to-end live deployment and hypervisor proxy reachability verification."""
 
