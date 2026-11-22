@@ -70,7 +70,7 @@ def run_cmd(
         if key:
             ssh_args.extend(["-i", key])
         destination = f"{user}@{host}" if user else host
-        full_cmd = ssh_args + [destination] + cmd
+        full_cmd = ssh_args + [destination, shlex.join(cmd)]
     else:
         full_cmd = cmd
 
@@ -355,6 +355,7 @@ def derive_vm_blueprint(vm_name: str, host: str, inventory_root: Path) -> dict:
                     "uefi_firmware": bp.get("uefi_firmware", "OVMF_CODE_4M.ms.fd"),
                     "snapshot_base_name": bp.get("snapshot_base_name", "snapshot-base-clean"),
                     "snapshot_base_desc": bp.get("snapshot_base_desc", "Pristine base setup with Docker and Python"),
+                    "repositories": bp.get("repositories", []),
                 }
         except Exception:
             pass
@@ -665,7 +666,7 @@ def render_vmhost_yaml(host_data: dict, vm_records: list[dict], template_path: P
     rendered = template_content
     for key, val in replacements.items():
         pattern = r"\{\{\s*" + re.escape(key) + r"\s*\}\}"
-        rendered = re.sub(pattern, val, rendered)
+        rendered = re.sub(pattern, lambda _m, v=str(val): v, rendered)
 
     return rendered
 
@@ -691,16 +692,13 @@ def render_repositories_yaml(vm_data: dict, bp: dict) -> str:
 
     lines = []
     for r in repos:
-        lines.append(f"        - name: \"{r.get('name', '')}\"")
-        lines.append(f"          local_path: \"{r.get('local_path', '')}\"")
-        lines.append(f"          remote_path: \"{r.get('remote_path', '')}\"")
-        lines.append(f"          internal_port: {r.get('internal_port', default_int)}")
-        lines.append(f"          external_port: {r.get('external_port', default_ext)}")
-        post_deploy = r.get("post_deploy", "")
-        if post_deploy:
-            lines.append(f"          post_deploy: \"{post_deploy}\"")
-        else:
-            lines.append(f"          post_deploy: \"\"")
+        lines.append(f"        - name: {json.dumps(str(r.get('name', '')))}")
+        lines.append(f"          local_path: {json.dumps(str(r.get('local_path', '')))}")
+        lines.append(f"          remote_path: {json.dumps(str(r.get('remote_path', '')))}")
+        lines.append(f"          internal_port: {int(r.get('internal_port', default_int))}")
+        lines.append(f"          external_port: {int(r.get('external_port', default_ext))}")
+        post_deploy = r.get("post_deploy", "") or ""
+        lines.append(f"          post_deploy: {json.dumps(str(post_deploy))}")
     return "\n".join(lines)
 
 
@@ -771,7 +769,7 @@ def render_vm_yaml(vm_data: dict, template_path: Path) -> str:
     rendered = template_content
     for key, val in replacements.items():
         pattern = r"\{\{\s*" + re.escape(key) + r"\s*\}\}"
-        rendered = re.sub(pattern, val, rendered)
+        rendered = re.sub(pattern, lambda _m, v=str(val): v, rendered)
 
     return rendered
 
@@ -827,7 +825,7 @@ def render_vm_runbook(vm_data: dict, host_data: dict, template_path: Path) -> st
     rendered = template_content
     for key, val in replacements.items():
         pattern = r"\{\{\s*" + re.escape(key) + r"\s*\}\}"
-        rendered = re.sub(pattern, val, rendered)
+        rendered = re.sub(pattern, lambda _m, v=str(val): v, rendered)
 
     return rendered
 

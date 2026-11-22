@@ -6,6 +6,7 @@ Facilitates customizing inventory VM runbooks (inventory/<vmhost>/<vm>/VM.md) fr
 
 import argparse
 import difflib
+import ipaddress
 import json
 import os
 import re
@@ -159,13 +160,21 @@ def load_from_inventory(host: str, repo_root: Path, target_vm: str | None = None
         else:
             ram_mib = 32768
 
-        # Collision prevention from recorded VMs & DHCP reservations
+        # Collision prevention from recorded VMs, sibling vm.yaml files & DHCP reservations
         existing_domains = [d.get("name") for d in vmhost.get("vms", {}).get("domains", [])]
         assigned_ips = set()
         for n in nets:
             for sh in n.get("static_reservations", []):
                 if sh.get("ip"):
-                    assigned_ips.add(sh["ip"])
+                    assigned_ips.add(str(sh["ip"]).strip())
+        for sibling_yaml in host_dir.glob("*/vm.yaml"):
+            try:
+                sdoc = yaml.safe_load(sibling_yaml.read_text(encoding="utf-8")) or {}
+                for iface in sdoc.get("vm", {}).get("network", {}).get("interfaces", []):
+                    if iface.get("ip"):
+                        assigned_ips.add(str(iface["ip"]).strip())
+            except Exception:
+                pass
 
         proj_slug = re.sub(r"[^a-z0-9]+", "-", DEFAULT_PROJECT_NAME.lower()).strip("-")
         cand_vm_name = target_vm or f"{proj_slug}-vm"
@@ -176,18 +185,21 @@ def load_from_inventory(host: str, repo_root: Path, target_vm: str | None = None
             cand_vm_name = f"{proj_slug}-vm-{idx:02d}"
 
         subnet_base = primary_net.get("ip", "192.168.122.1")
-        base_prefix = ".".join(subnet_base.split(".")[:3])
-        proposed_ip = f"{base_prefix}.236"
-        for octet in range(236, 250):
-            cand_ip = f"{base_prefix}.{octet}"
-            if cand_ip not in assigned_ips:
-                proposed_ip = cand_ip
-                break
+        netmask = primary_net.get("netmask", "255.255.255.0")
+        net_cidr = ipaddress.IPv4Network(f"{subnet_base}/{netmask}", strict=False)
+        cidr_suffix = f"/{net_cidr.prefixlen}"
+        assigned_ips.add(subnet_base)
+        all_hosts = [str(ip) for ip in net_cidr.hosts()]
+        preferred_ips = all_hosts[235:250] if len(all_hosts) >= 250 else all_hosts[-16:]
+        proposed_ip = next((ip for ip in preferred_ips if ip not in assigned_ips), None)
+        if not proposed_ip:
+            proposed_ip = next((ip for ip in all_hosts if ip not in assigned_ips), f"{subnet_base}")
 
+        dev_host = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip() or "workstation"
         data = {
             "PROJECT_NAME": DEFAULT_PROJECT_NAME,
-            "DEV_HOST": subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip() or "workstation",
-            "DEV_HOST_TITLE": (subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip() or "workstation").capitalize(),
+            "DEV_HOST": dev_host,
+            "DEV_HOST_TITLE": dev_host.capitalize(),
             "VM_SECONDARY_USER": subprocess.run(["whoami"], capture_output=True, text=True).stdout.strip() or "devuser",
             "HYPERVISOR_HOST": host,
             "HYPERVISOR_HOST_TITLE": host.capitalize(),
@@ -203,7 +215,7 @@ def load_from_inventory(host: str, repo_root: Path, target_vm: str | None = None
             "UEFI_FIRMWARE": "OVMF_CODE_4M.ms.fd",
             "VIRT_BRIDGE": primary_net.get("bridge", "virbr0"),
             "LIBVIRT_NETWORK": primary_net.get("name", "default"),
-            "SUBNET_CIDR": "/24",
+            "SUBNET_CIDR": cidr_suffix,
             "VM_IP": proposed_ip,
             "VM_MAC": f"52:54:00:{os.urandom(3).hex(':')}",
             "VM_NAME": cand_vm_name,
@@ -226,6 +238,19 @@ def load_from_inventory(host: str, repo_root: Path, target_vm: str | None = None
             vm_yaml_path = host_dir / effective_vm / "vm.yaml"
             parsed_vm = yaml.safe_load(vm_yaml_path.read_text(encoding="utf-8"))
             vm_obj = parsed_vm.get("vm", {})
+            # Preserve SSOT hardware resources and network identity from vm.yaml
+            vm_res = vm_obj.get("resources", {})
+            if vm_res.get("vcpu"):
+                data["VCPU_CORES"] = str(vm_res["vcpu"])
+            if vm_res.get("memory_mib"):
+                data["RAM_MIB"] = str(vm_res["memory_mib"])
+                data["RAM_GB"] = str(max(1, int(vm_res["memory_mib"]) // 1024))
+            vm_ifaces = vm_obj.get("network", {}).get("interfaces", [])
+            if vm_ifaces:
+                if vm_ifaces[0].get("ip"):
+                    data["VM_IP"] = str(vm_ifaces[0]["ip"])
+                if vm_ifaces[0].get("mac"):
+                    data["VM_MAC"] = str(vm_ifaces[0]["mac"])
             bp = vm_obj.get("blueprint", {})
             if bp:
                 print(f"[*] Layering blueprint from {format_path(vm_yaml_path)}")

@@ -6,6 +6,7 @@ and generates an optimized 'deploy_app_to_airlock.sh' in the project root.
 """
 
 import argparse
+import base64
 import os
 import re
 import sys
@@ -175,10 +176,14 @@ def evaluate_project_exclusions() -> list[str]:
 def generate_shell_script(vm_host: str, repos: list[dict], exclusions: list[str]) -> str:
     """Renders a robust deploy_app_to_airlock.sh bash script supporting multi-repo synchronization."""
     exclude_items = "\n".join(f"  --exclude='{exc}'" for exc in exclusions)
-    repo_entries = "\n".join(
-        f'  "{r["name"]}|{r["local_path"]}|{r["remote_path"]}|{r.get("post_deploy", "")}|{r.get("internal_port", 3000)}|{r.get("external_port", 3001)}"'
-        for r in repos
-    )
+    repo_lines = []
+    for r in repos:
+        post_raw = str(r.get("post_deploy", "") or "")
+        post_b64 = base64.b64encode(post_raw.encode("utf-8")).decode("ascii") if post_raw else ""
+        repo_lines.append(
+            f'  "{r["name"]}|{r["local_path"]}|{r["remote_path"]}|{post_b64}|{r.get("internal_port", 3000)}|{r.get("external_port", 3001)}"'
+        )
+    repo_entries = "\n".join(repo_lines)
 
     template = """#!/usr/bin/env bash
 # ==============================================================================
@@ -203,10 +208,17 @@ EXCLUDE_ARGS=(
 __EXCLUDE_ITEMS__
 )
 
-# Configured application repositories (name|local_path|remote_path|post_deploy|internal_port|external_port)
+# Configured application repositories (name|local_path|remote_path|post_deploy_b64|internal_port|external_port)
 REPOSITORIES=(
 __REPOSITORY_ENTRIES__
 )
+
+decode_post_cmd() {
+  local b64="${1:-}"
+  if [[ -n "$b64" ]]; then
+    printf '%s' "$b64" | base64 -d 2>/dev/null || printf '%s' "$b64"
+  fi
+}
 
 TARGET_REPO=""
 
@@ -218,8 +230,8 @@ Syncs application repositories to $VM_HOST and optionally executes post-deploy h
 
 Configured Repositories:
 $(for entry in "${REPOSITORIES[@]}"; do
-  IFS='|' read -r rname lpath rpath post_cmd int_port ext_port <<< "$entry"
-  post_cmd="${post_cmd:-}"
+  IFS='|' read -r rname lpath rpath post_b64 int_port ext_port <<< "$entry"
+  post_cmd="$(decode_post_cmd "${post_b64:-}")"
   int_port="${int_port:-3000}"
   ext_port="${ext_port:-3001}"
   echo "  - $rname: $lpath -> $VM_HOST:$rpath (http://$VM_HOST:$ext_port/ -> :$int_port)"
@@ -292,8 +304,8 @@ if [[ "$DRY_RUN" == "true" || "$OFFLINE_ONLY" == "true" ]]; then
   echo " Target VM: $VM_HOST"
   echo "============================================================"
   for entry in "${REPOSITORIES[@]}"; do
-    IFS='|' read -r rname lpath rpath post_cmd <<< "$entry"
-    post_cmd="${post_cmd:-}"
+    IFS='|' read -r rname lpath rpath post_b64 int_port ext_port <<< "$entry"
+    post_cmd="$(decode_post_cmd "${post_b64:-}")"
     if [[ -n "$TARGET_REPO" && "$rname" != "$TARGET_REPO" ]]; then
       continue
     fi
@@ -384,8 +396,8 @@ fi
 
 # Synchronize each repository
 for entry in "${REPOSITORIES[@]}"; do
-  IFS='|' read -r rname lpath rpath post_cmd int_port ext_port <<< "$entry"
-  post_cmd="${post_cmd:-}"
+  IFS='|' read -r rname lpath rpath post_b64 int_port ext_port <<< "$entry"
+  post_cmd="$(decode_post_cmd "${post_b64:-}")"
   int_port="${int_port:-3000}"
   ext_port="${ext_port:-3001}"
   if [[ -n "$TARGET_REPO" && "$rname" != "$TARGET_REPO" ]]; then
@@ -422,8 +434,8 @@ for entry in "${REPOSITORIES[@]}"; do
       echo "    [PLAN] Post-deploy on $VM_HOST (PORT=$int_port): cd $remote_dir && export HOST=0.0.0.0 PORT=$int_port && $post_cmd"
     else
       echo "[*] Executing post-deploy command on $VM_HOST (PORT=$int_port):"
-      echo "    -> cd $remote_dir && export HOST=0.0.0.0 PORT=$int_port && (nohup $post_cmd > app.log 2>&1 &)"
-      ssh "$VM_HOST" "old_pid=\\$(ss -tlnp 'sport = :${int_port}' 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); [ -n \"\\$old_pid\" ] && kill -9 \\$old_pid 2>/dev/null || true; cd $remote_dir && export HOST=0.0.0.0 PORT=$int_port && (nohup $post_cmd > app.log 2>&1 &) && sleep 1"
+      echo "    -> cd $remote_dir && export HOST=0.0.0.0 PORT=$int_port && (nohup $post_cmd </dev/null > app.log 2>&1 &)"
+      ssh "$VM_HOST" "old_pid=\\$(ss -tlnp 'sport = :${int_port}' 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); [ -n \"\\$old_pid\" ] && kill -9 \\$old_pid 2>/dev/null || true; cd $remote_dir && export HOST=0.0.0.0 PORT=$int_port && cmd_str=\\$(printf '%s' '${post_b64}' | base64 -d) && (nohup bash -lc \"\\$cmd_str\" </dev/null > app.log 2>&1 &) && sleep 1"
       echo "[✓] Post-deploy command completed."
     fi
   fi
@@ -705,12 +717,27 @@ def main():
         out_path.chmod(0o755)
         print(f"[✓] Successfully generated custom deployment script: {out_path}")
     elif inv_dir.exists():
-        # Inventory exists: write multi-VM dispatcher to project root deploy_app_to_airlock.sh
-        root_script = DEFAULT_OUTPUT_SCRIPT
+        # Inventory exists: write multi-VM dispatcher to user persistent bin dir (~/.airlock/bin/)
+        # and only update repo-root script when writable, outside site-packages, and not using custom test override.
         dispatcher_content = generate_dispatcher_script(default_vm=target_host)
-        root_script.write_text(dispatcher_content, encoding="utf-8")
-        root_script.chmod(0o755)
-        print(f"[✓] Successfully generated Multi-VM Dispatcher: {root_script} (Default: {target_host})")
+        user_bin_dir = Path.home() / ".airlock" / "bin"
+        try:
+            user_bin_dir.mkdir(parents=True, exist_ok=True)
+            user_dispatcher = user_bin_dir / "deploy_app_to_airlock.sh"
+            user_dispatcher.write_text(dispatcher_content, encoding="utf-8")
+            user_dispatcher.chmod(0o755)
+        except OSError:
+            pass
+
+        in_site_packages = "site-packages" in str(REPO_ROOT) or "_assets" in str(REPO_ROOT)
+        custom_inv_override = "AIRLOCK_INVENTORY_DIR" in os.environ
+        if not in_site_packages and not custom_inv_override and os.access(REPO_ROOT, os.W_OK):
+            root_script = DEFAULT_OUTPUT_SCRIPT
+            root_script.write_text(dispatcher_content, encoding="utf-8")
+            root_script.chmod(0o755)
+            print(f"[✓] Successfully generated Multi-VM Dispatcher: {root_script} (Default: {target_host})")
+        else:
+            print(f"[✓] Successfully generated Multi-VM Dispatcher: ~/.airlock/bin/deploy_app_to_airlock.sh (Default: {target_host})")
     else:
         # Standalone project: write single VM deployment script
         root_script = DEFAULT_OUTPUT_SCRIPT

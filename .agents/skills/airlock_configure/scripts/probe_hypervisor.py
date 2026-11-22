@@ -10,6 +10,7 @@ import ipaddress
 import json
 import random
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -40,7 +41,14 @@ class HypervisorCapabilityError(Exception):
 def run_cmd_status(cmd: list[str], host: str | None = None) -> tuple[int, str, str]:
     """Executes a command locally or over SSH and returns (returncode, stdout, stderr)."""
     if host and host not in ("localhost", "127.0.0.1"):
-        full_cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host] + cmd
+        full_cmd = [
+            "ssh",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5",
+            "-o", "StrictHostKeyChecking=accept-new",
+            host,
+            shlex.join(cmd),
+        ]
     else:
         full_cmd = cmd
 
@@ -202,7 +210,14 @@ def check_hypervisor_capabilities(host: str) -> None:
 def run_cmd(cmd: list[str], host: str | None = None, check: bool = True) -> str:
     """Executes a command locally or over SSH."""
     if host and host not in ("localhost", "127.0.0.1"):
-        full_cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host] + cmd
+        full_cmd = [
+            "ssh",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5",
+            "-o", "StrictHostKeyChecking=accept-new",
+            host,
+            shlex.join(cmd),
+        ]
     else:
         full_cmd = cmd
 

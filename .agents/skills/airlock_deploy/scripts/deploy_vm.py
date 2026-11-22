@@ -999,6 +999,7 @@ def main():
     parser.add_argument("--vm", type=str, help="Target VM domain name in inventory (e.g. airlock-vm)")
     parser.add_argument("--config", type=Path, default=None, help="Path to VM specification YAML (default: auto-detected from inventory)")
     parser.add_argument("--doc", type=Path, default=None, help="Path to supplementary runbook markdown or custom specification")
+    parser.add_argument("--boot-timeout", type=int, default=240, help="Seconds to wait for guest SSH readiness after provisioning (default: 240)")
     args = parser.parse_args()
 
     if args.config:
@@ -1161,18 +1162,26 @@ def main():
 
     # Step 7: Wait for VM Boot & SSH Probe
     if not args.dry_run:
-        print(f"\n[*] Waiting for VM '{vm_name}' to boot and respond to SSH...")
-        max_attempts = 30
+        poll_interval = 4
+        max_attempts = max(1, args.boot_timeout // poll_interval)
+        print(f"\n[*] Waiting for VM '{vm_name}' to boot and respond to SSH (timeout: {args.boot_timeout}s)...")
         ssh_ready = False
+        lease_seen = False
         for attempt in range(1, max_attempts + 1):
-            sys.stdout.write(f"\r    -> Probing SSH (Attempt {attempt}/{max_attempts})...")
+            if not lease_seen and (attempt == 1 or attempt % 5 == 0):
+                rc_ip, ip_out, _ = run_cmd_status(["sudo", "virsh", "domifaddr", vm_name], host=host)
+                if rc_ip == 0 and params["VM_IP"] in ip_out:
+                    lease_seen = True
+                    print(f"\n    [✓] DHCP lease active for '{vm_name}': {params['VM_IP']}")
+            lease_label = "IP active" if lease_seen else "waiting for DHCP"
+            sys.stdout.write(f"\r    -> Probing SSH (Attempt {attempt}/{max_attempts} | {lease_label})...")
             sys.stdout.flush()
             ret, _, _ = run_cmd_status(["echo", "online"], host=vm_name)
             if ret == 0:
                 ssh_ready = True
                 print("\n    [✓] VM is reachable over SSH!")
                 break
-            time.sleep(4)
+            time.sleep(poll_interval)
 
         if not ssh_ready:
             print("\n[-] Notice: VM did not respond to SSH within timeout. It may still be completing cloud-init installation.")
