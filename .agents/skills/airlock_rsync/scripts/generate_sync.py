@@ -453,31 +453,59 @@ def generate_dispatcher_script(default_vm: str = "airlock-vm") -> str:
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
-INVENTORY_DIR="${{SCRIPT_DIR}}/inventory"
 DEFAULT_VM="{default_vm}"
+
+# Resolve inventory search paths hierarchically:
+# 1. AIRLOCK_INVENTORY_DIR environment variable (highest priority)
+# 2. ~/.airlock/inventory (standard user persistent directory)
+# 3. ${{SCRIPT_DIR}}/inventory (repo-local development and test fixture fallback)
+INVENTORY_DIRS=()
+if [[ -n "${{AIRLOCK_INVENTORY_DIR:-}}" ]]; then
+  INVENTORY_DIRS+=("${{AIRLOCK_INVENTORY_DIR}}")
+fi
+if [[ -d "${{HOME}}/.airlock/inventory" ]]; then
+  INVENTORY_DIRS+=("${{HOME}}/.airlock/inventory")
+fi
+if [[ -d "${{SCRIPT_DIR}}/inventory" ]]; then
+  INVENTORY_DIRS+=("${{SCRIPT_DIR}}/inventory")
+fi
+if [[ ${{#INVENTORY_DIRS[@]}} -eq 0 ]]; then
+  INVENTORY_DIRS+=("${{HOME}}/.airlock/inventory")
+fi
 
 list_vms() {{
   echo "Available AirlockVM Virtual Machines in inventory:"
-  if [ -d "${{INVENTORY_DIR}}" ]; then
-    declare -A seen_vms=()
-    for s in "${{INVENTORY_DIR}}"/*/*/deploy_app_to_airlock.sh "${{INVENTORY_DIR}}"/*/*/deploy_app_to_vm.sh; do
-      if [ -f "$s" ]; then
-        vm_dir="$(dirname "$s")"
-        vm_name="$(basename "$vm_dir")"
-        host_name="$(basename "$(dirname "$vm_dir")")"
-        if [ -z "${{seen_vms["$vm_name"]:-}}" ]; then
-          seen_vms["$vm_name"]=1
-          script_rel="${{s#"${{SCRIPT_DIR}}/"}}"
-          if [ "${{vm_name}}" = "${{DEFAULT_VM}}" ]; then
-            echo "  - ${{vm_name}} (host: ${{host_name}}) [DEFAULT] -> ${{script_rel}}"
-          else
-            echo "  - ${{vm_name}} (host: ${{host_name}}) -> ${{script_rel}}"
+  declare -A seen_vms=()
+  local found=0
+  for inv in "${{INVENTORY_DIRS[@]}}"; do
+    if [ -d "$inv" ]; then
+      for s in "${{inv}}"/*/*/deploy_app_to_airlock.sh "${{inv}}"/*/*/deploy_app_to_vm.sh; do
+        if [ -f "$s" ]; then
+          vm_dir="$(dirname "$s")"
+          vm_name="$(basename "$vm_dir")"
+          host_name="$(basename "$(dirname "$vm_dir")")"
+          if [ -z "${{seen_vms["$vm_name"]:-}}" ]; then
+            seen_vms["$vm_name"]=1
+            found=1
+            if [[ "$s" == "${{SCRIPT_DIR}}/"* ]]; then
+              script_disp="${{s#"${{SCRIPT_DIR}}/"}}"
+            elif [[ "$s" == "${{HOME}}/"* ]]; then
+              script_disp="~/${{s#"${{HOME}}/"}}"
+            else
+              script_disp="$s"
+            fi
+            if [ "${{vm_name}}" = "${{DEFAULT_VM}}" ]; then
+              echo "  - ${{vm_name}} (host: ${{host_name}}) [DEFAULT] -> ${{script_disp}}"
+            else
+              echo "  - ${{vm_name}} (host: ${{host_name}}) -> ${{script_disp}}"
+            fi
           fi
         fi
-      fi
-    done
-  else
-    echo "  (No inventory directory found at ${{INVENTORY_DIR}})"
+      done
+    fi
+  done
+  if [ $found -eq 0 ]; then
+    echo "  (No virtual machine deployment scripts found in: ${{INVENTORY_DIRS[*]}})"
   fi
 }}
 
@@ -514,17 +542,21 @@ elif [ "$1" = "--all" ]; then
   shift
   echo "[*] Deploying application to all inventory VMs..."
   declare -A seen_all_vms=()
-  for s in "${{INVENTORY_DIR}}"/*/*/deploy_app_to_airlock.sh "${{INVENTORY_DIR}}"/*/*/deploy_app_to_vm.sh; do
-    if [ -f "$s" ]; then
-      vm="$(basename "$(dirname "$s")")"
-      if [ -z "${{seen_all_vms["$vm"]:-}}" ]; then
-        seen_all_vms["$vm"]=1
-        echo ""
-        echo "============================================================"
-        echo " Target VM: ${{vm}}"
-        echo "============================================================"
-        "$s" "$@"
-      fi
+  for inv in "${{INVENTORY_DIRS[@]}}"; do
+    if [ -d "$inv" ]; then
+      for s in "${{inv}}"/*/*/deploy_app_to_airlock.sh "${{inv}}"/*/*/deploy_app_to_vm.sh; do
+        if [ -f "$s" ]; then
+          vm="$(basename "$(dirname "$s")")"
+          if [ -z "${{seen_all_vms["$vm"]:-}}" ]; then
+            seen_all_vms["$vm"]=1
+            echo ""
+            echo "============================================================"
+            echo " Target VM: ${{vm}}"
+            echo "============================================================"
+            "$s" "$@"
+          fi
+        fi
+      done
     fi
   done
   echo ""
@@ -540,16 +572,18 @@ else
   PASSTHROUGH_ARGS=("$@")
 fi
 
-# Locate the deployment script for the target VM (prefers deploy_app_to_airlock.sh, falls back to deploy_app_to_vm.sh)
+# Locate the deployment script for the target VM across inventory search paths
 TARGET_SCRIPT=""
-if [ -d "${{INVENTORY_DIR}}" ]; then
-  for s in "${{INVENTORY_DIR}}"/*/"${{TARGET_VM}}"/deploy_app_to_airlock.sh "${{INVENTORY_DIR}}"/*/"${{TARGET_VM}}"/deploy_app_to_vm.sh; do
-    if [ -f "$s" ]; then
-      TARGET_SCRIPT="$s"
-      break
-    fi
-  done
-fi
+for inv in "${{INVENTORY_DIRS[@]}}"; do
+  if [ -d "$inv" ]; then
+    for s in "${{inv}}"/*/"${{TARGET_VM}}"/deploy_app_to_airlock.sh "${{inv}}"/*/"${{TARGET_VM}}"/deploy_app_to_vm.sh; do
+      if [ -f "$s" ]; then
+        TARGET_SCRIPT="$s"
+        break 2
+      fi
+    done
+  fi
+done
 
 if [ -z "${{TARGET_SCRIPT}}" ]; then
   echo "[-] Error: Could not find deployment script for VM '${{TARGET_VM}}' in inventory/" >&2

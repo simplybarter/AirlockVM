@@ -11,21 +11,17 @@ import subprocess
 from typing import Any
 import yaml
 
+from airlock.inventory import find_vmhost_yaml, get_inventory_search_dirs, get_primary_inventory_dir
+
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
-INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
+INVENTORY_DIR = get_primary_inventory_dir()
 
 
 def inspect_hypervisor(vmhost: str) -> dict[str, Any]:
     """Inspects live or documented capacity of a hypervisor host."""
-    host_yaml = INVENTORY_DIR / vmhost / "vmhost.yaml"
-    if not host_yaml.exists():
+    host_yaml, doc = find_vmhost_yaml(vmhost)
+    if not host_yaml or not doc:
         return {"success": False, "error": f"Host '{vmhost}' not found in inventory."}
-
-    try:
-        with open(host_yaml, "r", encoding="utf-8") as f:
-            doc = yaml.safe_load(f) or {}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
 
     data = doc.get("vmhost", {})
     hw = data.get("hardware", {})
@@ -94,15 +90,18 @@ def select_optimal_hypervisor(
     required_disk_gb: int = 20,
 ) -> dict[str, Any]:
     """Evaluates all registered hypervisors and selects the best host for placement."""
-    if not INVENTORY_DIR.exists():
-        return {"success": False, "error": "No inventory directory found."}
-
     candidates = []
-    for host_dir in INVENTORY_DIR.iterdir():
-        if host_dir.is_dir() and (host_dir / "vmhost.yaml").exists():
-            info = inspect_hypervisor(host_dir.name)
-            if info.get("success"):
-                candidates.append(info)
+    seen_hosts: set[str] = set()
+
+    for inv_dir in get_inventory_search_dirs():
+        if not inv_dir.exists():
+            continue
+        for host_dir in inv_dir.iterdir():
+            if host_dir.is_dir() and (host_dir / "vmhost.yaml").exists() and host_dir.name not in seen_hosts:
+                seen_hosts.add(host_dir.name)
+                info = inspect_hypervisor(host_dir.name)
+                if info.get("success"):
+                    candidates.append(info)
 
     if not candidates:
         return {"success": False, "error": "No hypervisors discovered in inventory."}

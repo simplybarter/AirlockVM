@@ -23,6 +23,14 @@ from airlock.detector import detect_application
 from airlock.diagnostics import diagnose_workload_failure
 from airlock.drift import audit_vm_drift, reconcile_vm_drift
 from airlock.health import verify_route_health
+from airlock.inventory import (
+    find_vm_yaml,
+    find_vmhost_yaml,
+    format_config_path,
+    get_inventory_search_dirs,
+    get_primary_inventory_dir,
+    list_inventory_hosts,
+)
 from airlock.network import allocate_vm_network
 from airlock.placement import inspect_hypervisor, select_optimal_hypervisor
 from airlock.ports import allocate_external_port, get_inventory_used_ports, get_hypervisor_live_ports
@@ -31,9 +39,9 @@ from airlock.profiler import profile_workload
 from airlock.security import audit_vm_security
 from airlock.snapshots import create_pre_deploy_checkpoint, rollback_checkpoint
 
-# AirlockVM canonical root directory
+# AirlockVM canonical root directory and primary inventory directory
 AIRLOCK_ROOT = Path(__file__).resolve().parents[3]
-INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
+INVENTORY_DIR = get_primary_inventory_dir()
 DEPLOY_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py"
 CONFIGURE_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_configure" / "scripts" / "configure_vm.py"
 GENERATE_SYNC_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_rsync" / "scripts" / "generate_sync.py"
@@ -83,32 +91,7 @@ def _run_command(cmd: list[str], timeout: int = 120) -> dict[str, Any]:
 
 def _find_vm_yaml(vm_name: str) -> tuple[Path | None, dict[str, Any] | None]:
     """Locates vm.yaml for a given VM domain name across inventory."""
-    if not INVENTORY_DIR.exists() or not vm_name:
-        return None, None
-
-    name_str = str(vm_name).strip()
-    if not name_str:
-        return None, None
-
-    for candidate in INVENTORY_DIR.glob(f"*/{name_str}/vm.yaml"):
-        try:
-            with open(candidate, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-            return candidate, data
-        except Exception:
-            continue
-
-    # Case-insensitive fallback
-    for candidate in INVENTORY_DIR.glob("*/*/vm.yaml"):
-        if candidate.parent.name.lower() == name_str.lower():
-            try:
-                with open(candidate, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f) or {}
-                return candidate, data
-            except Exception:
-                continue
-
-    return None, None
+    return find_vm_yaml(vm_name)
 
 
 # ==============================================================================
@@ -123,37 +106,44 @@ def airlock_ping() -> str:
 
 @server.tool()
 def airlock_list() -> dict[str, Any]:
-    """Lists all registered hypervisors and VMs in inventory along with their status, ports, and repositories."""
+    """Lists all registered hypervisors and VMs across active inventory paths along with their status, ports, and repositories."""
     vms: list[dict[str, Any]] = []
-    if not INVENTORY_DIR.exists():
-        return {"success": True, "vms": []}
+    seen_vms: set[str] = set()
 
-    for vm_yaml_path in sorted(INVENTORY_DIR.glob("*/*/vm.yaml")):
-        try:
-            with open(vm_yaml_path, "r", encoding="utf-8") as f:
-                doc = yaml.safe_load(f) or {}
-            vm_data = doc.get("vm", {})
-            bp = vm_data.get("blueprint", {})
-            res = vm_data.get("resources", {})
-            net = vm_data.get("network", {})
-            ifaces = net.get("interfaces", [])
-            ip = ifaces[0].get("ip", "unknown") if ifaces else "unknown"
-
-            repos = bp.get("repositories", [])
-            vms.append({
-                "vm_name": vm_data.get("name", vm_yaml_path.parent.name),
-                "host": vm_data.get("host", vm_yaml_path.parents[1].name),
-                "state": vm_data.get("state", "unknown"),
-                "ip": ip,
-                "vcpu": res.get("vcpu", 0),
-                "memory_mib": res.get("memory_mib", 0),
-                "internal_port": bp.get("app_internal_port", 3000),
-                "external_port": bp.get("proxy_external_port", 3001),
-                "repositories": repos,
-                "config_path": str(vm_yaml_path.relative_to(AIRLOCK_ROOT)),
-            })
-        except Exception:
+    for inv_dir in get_inventory_search_dirs():
+        if not inv_dir.exists():
             continue
+        for vm_yaml_path in sorted(inv_dir.glob("*/*/vm.yaml")):
+            try:
+                with open(vm_yaml_path, "r", encoding="utf-8") as f:
+                    doc = yaml.safe_load(f) or {}
+                vm_data = doc.get("vm", {})
+                vm_name = vm_data.get("name", vm_yaml_path.parent.name)
+                if vm_name in seen_vms:
+                    continue
+                seen_vms.add(vm_name)
+
+                bp = vm_data.get("blueprint", {})
+                res = vm_data.get("resources", {})
+                net = vm_data.get("network", {})
+                ifaces = net.get("interfaces", [])
+                ip = ifaces[0].get("ip", "unknown") if ifaces else "unknown"
+
+                repos = bp.get("repositories", [])
+                vms.append({
+                    "vm_name": vm_name,
+                    "host": vm_data.get("host", vm_yaml_path.parents[1].name),
+                    "state": vm_data.get("state", "unknown"),
+                    "ip": ip,
+                    "vcpu": res.get("vcpu", 0),
+                    "memory_mib": res.get("memory_mib", 0),
+                    "internal_port": bp.get("app_internal_port", 3000),
+                    "external_port": bp.get("proxy_external_port", 3001),
+                    "repositories": repos,
+                    "config_path": format_config_path(vm_yaml_path),
+                })
+            except Exception:
+                continue
 
     return {"success": True, "vms": vms, "total_vms": len(vms)}
 
@@ -171,7 +161,7 @@ def airlock_status(vm_name: str) -> dict[str, Any]:
     cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", vm_name, "--status"]
     result = _run_command(cmd, timeout=30)
     result["vm_name"] = vm_name
-    result["config_path"] = str(yaml_path.relative_to(AIRLOCK_ROOT))
+    result["config_path"] = format_config_path(yaml_path)
     return result
 
 
@@ -216,7 +206,7 @@ def airlock_find_port(
             target_host = doc.get("vm", {}).get("host", target_host)
 
     if not target_host:
-        hosts = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()]
+        hosts = list_inventory_hosts()
         target_host = hosts[0] if hosts else "remotehost"
 
     pref = preferred_port if preferred_port > 0 else None
@@ -246,7 +236,7 @@ def airlock_alloc_network(vmhost: str = "", network_name: str = "default") -> di
         network_name: Libvirt network name (defaults to 'default').
     """
     if not vmhost:
-        hosts = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()]
+        hosts = list_inventory_hosts()
         vmhost = hosts[0] if hosts else "remotehost"
 
     return allocate_vm_network(vmhost=vmhost, network_name=network_name)
@@ -469,7 +459,7 @@ def airlock_create_vm(
         if placement.get("success") and (placement.get("selected_hypervisor") or placement.get("selected_host")):
             vmhost = placement.get("selected_hypervisor") or placement.get("selected_host")
         else:
-            hosts = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()]
+            hosts = list_inventory_hosts()
             vmhost = hosts[0] if hosts else "remotehost"
 
     # Allocate collision-free network IP & MAC
@@ -605,8 +595,8 @@ def airlock_create_vm(
         "vm_name": vm_name,
         "host": vmhost,
         "app_name": app_name,
-        "config_path": str(yaml_path.relative_to(AIRLOCK_ROOT)),
-        "runbook_path": str(runbook_path.relative_to(AIRLOCK_ROOT)),
+        "config_path": format_config_path(yaml_path),
+        "runbook_path": format_config_path(runbook_path),
         "local_path": str(resolved_path),
         "allocated_ip": allocated_ip,
         "allocated_mac": allocated_mac,
@@ -718,7 +708,7 @@ def airlock_attach_app(
         "success": True,
         "vm_name": vm_name,
         "app_name": app_name,
-        "config_path": str(yaml_path.relative_to(AIRLOCK_ROOT)),
+        "config_path": format_config_path(yaml_path),
         "local_path": str(resolved_path),
         "internal_port": internal_port,
         "external_port": final_external_port,

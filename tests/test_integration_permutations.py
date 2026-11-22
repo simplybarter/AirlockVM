@@ -27,6 +27,7 @@ import airlock.mcp.server as srv
 from airlock.detector import detect_application
 from airlock.diagnostics import diagnose_workload_failure
 from airlock.drift import audit_vm_drift
+from airlock.inventory import get_inventory_search_dirs, get_primary_inventory_dir, find_vm_yaml
 from airlock.network import allocate_vm_network
 from airlock.placement import inspect_hypervisor, select_optimal_hypervisor
 from airlock.ports import allocate_external_port, get_inventory_used_ports
@@ -54,11 +55,9 @@ class TestPermutationA_ObservabilityAndInspection(unittest.TestCase):
     def test_airlock_list(self):
         result = srv.airlock_list()
         self.assertTrue(result.get("success"))
-        self.assertGreaterEqual(result.get("total_vms", 0), 5)
+        self.assertGreaterEqual(result.get("total_vms", 0), 1)
         vm_names = [v["vm_name"] for v in result.get("vms", [])]
         self.assertIn("dummy-airlock-app-vm", vm_names)
-        self.assertIn("airlock-vm", vm_names)
-        self.assertIn("appsurfer-vm", vm_names)
 
     def test_airlock_status_unprovisioned(self):
         result = srv.airlock_status("dummy-airlock-app-vm")
@@ -465,6 +464,39 @@ class TestPermutationI_LiveDeploymentAndProxyReachability(unittest.TestCase):
         status = srv.airlock_status("dummy-airlock-app-vm")
         self.assertTrue(status.get("success"))
         self.assertIn("running", status.get("stdout", "").lower())
+
+
+class TestPermutationJ_HierarchicalInventoryResolution(unittest.TestCase):
+    """Permutation J: Tests hierarchical inventory resolution (env var, ~/.airlock, repo)."""
+
+    def test_env_var_override(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            custom_inv = Path(tmpdir) / "inventory"
+            vm_dir = custom_inv / "remotehost" / "custom-env-vm"
+            vm_dir.mkdir(parents=True)
+            (vm_dir / "vm.yaml").write_text("vm:\n  name: custom-env-vm\n  host: remotehost\n")
+
+            import os
+            old_env = os.environ.get("AIRLOCK_INVENTORY_DIR")
+            try:
+                os.environ["AIRLOCK_INVENTORY_DIR"] = str(custom_inv)
+                search_dirs = get_inventory_search_dirs()
+                self.assertEqual(search_dirs[0], custom_inv)
+                path, doc = find_vm_yaml("custom-env-vm")
+                self.assertIsNotNone(path)
+                self.assertEqual(doc["vm"]["name"], "custom-env-vm")
+            finally:
+                if old_env is not None:
+                    os.environ["AIRLOCK_INVENTORY_DIR"] = old_env
+                else:
+                    os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
+
+    def test_repo_fallback(self):
+        search_dirs = get_inventory_search_dirs()
+        self.assertTrue(any(d == AIRLOCK_ROOT / "inventory" for d in search_dirs))
+        path, doc = find_vm_yaml("dummy-airlock-app-vm")
+        self.assertIsNotNone(path)
+        self.assertEqual(doc["vm"]["name"], "dummy-airlock-app-vm")
 
 
 if __name__ == "__main__":

@@ -12,8 +12,10 @@ import random
 from typing import Any
 import yaml
 
+from airlock.inventory import find_vmhost_yaml, get_inventory_search_dirs, get_primary_inventory_dir
+
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
-INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
+INVENTORY_DIR = get_primary_inventory_dir()
 
 
 def allocate_vm_network(
@@ -22,18 +24,12 @@ def allocate_vm_network(
     exclude_vm: str | None = None,
 ) -> dict[str, Any]:
     """Allocates the next available collision-free static IP and MAC on the hypervisor network."""
-    host_yaml = INVENTORY_DIR / vmhost / "vmhost.yaml"
-    if not host_yaml.exists():
+    host_yaml, host_doc = find_vmhost_yaml(vmhost)
+    if not host_yaml or not host_doc:
         return {
             "success": False,
             "error": f"Hypervisor '{vmhost}' not found in inventory directory.",
         }
-
-    try:
-        with open(host_yaml, "r", encoding="utf-8") as f:
-            host_doc = yaml.safe_load(f) or {}
-    except Exception as e:
-        return {"success": False, "error": f"Error reading {host_yaml}: {e}"}
 
     vmhost_data = host_doc.get("vmhost", {})
     virt = vmhost_data.get("virtualization", {})
@@ -48,20 +44,23 @@ def allocate_vm_network(
     used_ips: set[str] = {gateway_ip, "192.168.122.0", "192.168.122.255"}
     used_macs: set[str] = set()
 
-    for vm_yaml in INVENTORY_DIR.glob(f"{vmhost}/*/vm.yaml"):
-        if exclude_vm and vm_yaml.parent.name == exclude_vm:
+    for inv_dir in get_inventory_search_dirs():
+        if not inv_dir.exists():
             continue
-        try:
-            with open(vm_yaml, "r", encoding="utf-8") as f:
-                vdoc = yaml.safe_load(f) or {}
-            net_data = vdoc.get("vm", {}).get("network", {})
-            for iface in net_data.get("interfaces", []):
-                if iface.get("ip"):
-                    used_ips.add(str(iface["ip"]).strip())
-                if iface.get("mac"):
-                    used_macs.add(str(iface["mac"]).strip().lower())
-        except Exception:
-            continue
+        for vm_yaml in inv_dir.glob(f"{vmhost}/*/vm.yaml"):
+            if exclude_vm and vm_yaml.parent.name == exclude_vm:
+                continue
+            try:
+                with open(vm_yaml, "r", encoding="utf-8") as f:
+                    vdoc = yaml.safe_load(f) or {}
+                net_data = vdoc.get("vm", {}).get("network", {})
+                for iface in net_data.get("interfaces", []):
+                    if iface.get("ip"):
+                        used_ips.add(str(iface["ip"]).strip())
+                    if iface.get("mac"):
+                        used_macs.add(str(iface["mac"]).strip().lower())
+            except Exception:
+                continue
 
     # Also collect static_reservations from vmhost.yaml
     if target_net:

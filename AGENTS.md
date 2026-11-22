@@ -18,7 +18,7 @@ AirlockVM is an open, universally portable control plane designed to run cleanly
    * **Never** hardcode local developer usernames (e.g., `alice`, `bob`, `developer`, `admin`) in script templates, default parameters, or inventory generators.
    * User accounts must always be resolved dynamically at runtime using `getpass.getuser()` or environment variables (`os.environ.get("USER", "developer")`).
 4. **Zero Upstream Inventory Pollution Invariant**:
-   * `inventory/` represents local machine execution state and is strictly git-ignored.
+   * Machine inventory (`~/.airlock/inventory/` or repo `inventory/`) represents local machine execution state. Repo `inventory/` is strictly git-ignored.
    * Agents must never track, stage, or commit generated host profiles, guest VM definitions (`vm.yaml`), runbooks (`VM.md`), or private SSH keys into the git repository.
 
 ---
@@ -40,11 +40,17 @@ To prevent configuration drift, ambiguity, and redundancy, AirlockVM establishes
 
 * **Cross-Referencing Rule**: When documentation needs information outside its designated domain, it must link by reference to the authoritative document rather than redefining the concept.
 
-### 2.2 Inventory SSOT Architecture (`inventory/`)
+### 2.2 Inventory SSOT Architecture & Hierarchical Discovery
 
-* **`inventory/{vmhost}/vmhost.yaml`**: The SSOT for hypervisor capabilities (CPU threads, total RAM, storage pools, bridge networking, libvirt/qemu versions).
-* **`inventory/{vmhost}/{vm}/vm.yaml`**: The canonical declarative SSOT for an individual guest virtual machine domain (state, hardware resources, static IP/MAC, proxy ports, and attached repository blueprints).
-* **`inventory/{vmhost}/{vm}/VM.md`**: The parameterized operational runbook rendered directly from the `vm.yaml` SSOT.
+AirlockVM resolves inventory using a three-tier hierarchical discovery mechanism:
+1. **Explicit Environment Override**: `$AIRLOCK_INVENTORY_DIR` (highest precedence; ideal for isolated CI / test runs).
+2. **User Persistent Location**: `~/.airlock/inventory/` (standard user persistent location; decoupled from git clone paths and immune to `git clean`).
+3. **Repository Development Fallback**: `inventory/` (repo-local development and integration test fixture fallback).
+
+Within the resolved inventory hierarchy (`<inventory_root>/{vmhost}/{vm}/`):
+* **`vmhost.yaml`**: The SSOT for hypervisor capabilities (CPU threads, total RAM, storage pools, bridge networking, libvirt/qemu versions).
+* **`vm.yaml`**: The canonical declarative SSOT for an individual guest virtual machine domain (state, hardware resources, static IP/MAC, proxy ports, and attached repository blueprints).
+* **`VM.md`**: The parameterized operational runbook rendered directly from the `vm.yaml` SSOT.
 * **`deploy_app_to_airlock.sh`**: The root multi-VM dispatcher generated deterministically from all registered inventory records.
 
 ---

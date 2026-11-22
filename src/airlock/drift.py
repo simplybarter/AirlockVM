@@ -13,8 +13,10 @@ from typing import Any
 import xml.etree.ElementTree as ET
 import yaml
 
+from airlock.inventory import find_vm_yaml, get_primary_inventory_dir
+
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
-INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
+INVENTORY_DIR = get_primary_inventory_dir()
 ADD_HOST_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_inventory" / "scripts" / "add_vmhost.py"
 DEPLOY_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py"
 
@@ -49,15 +51,7 @@ def _ssh_cmd(host: str, command: str, timeout: int = 5) -> tuple[int, str, str]:
 
 
 def _find_vm_yaml(vm_name: str) -> tuple[Path | None, dict[str, Any] | None]:
-    if not INVENTORY_DIR.exists():
-        return None, None
-    for cand in INVENTORY_DIR.glob(f"*/{vm_name}/vm.yaml"):
-        try:
-            with open(cand, "r", encoding="utf-8") as f:
-                return cand, yaml.safe_load(f) or {}
-        except Exception:
-            continue
-    return None, None
+    return find_vm_yaml(vm_name)
 
 
 def audit_vm_drift(vm_name: str) -> dict[str, Any]:

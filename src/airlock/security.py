@@ -13,8 +13,10 @@ import subprocess
 from typing import Any
 import yaml
 
+from airlock.inventory import find_vm_yaml, get_primary_inventory_dir
+
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
-INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
+INVENTORY_DIR = get_primary_inventory_dir()
 
 
 def _ssh_guest(vm_name: str, cmd: str, timeout: int = 5) -> tuple[int, str, str]:
@@ -42,15 +44,7 @@ def _ssh_guest(vm_name: str, cmd: str, timeout: int = 5) -> tuple[int, str, str]
 
 
 def _find_vm_yaml(vm_name: str) -> tuple[Path | None, dict[str, Any] | None]:
-    if not INVENTORY_DIR.exists():
-        return None, None
-    for cand in INVENTORY_DIR.glob(f"*/{vm_name}/vm.yaml"):
-        try:
-            with open(cand, "r", encoding="utf-8") as f:
-                return cand, yaml.safe_load(f) or {}
-        except Exception:
-            continue
-    return None, None
+    return find_vm_yaml(vm_name)
 
 
 def audit_vm_security(vm_name: str, app_name: str = "") -> dict[str, Any]:

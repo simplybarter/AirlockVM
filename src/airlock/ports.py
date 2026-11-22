@@ -12,8 +12,10 @@ import subprocess
 from typing import Any
 import yaml
 
+from airlock.inventory import get_inventory_search_dirs, get_primary_inventory_dir
+
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
-INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
+INVENTORY_DIR = get_primary_inventory_dir()
 
 
 def get_inventory_used_ports(
@@ -23,40 +25,41 @@ def get_inventory_used_ports(
 ) -> set[int]:
     """Gathers all external proxy ports registered across inventory VM blueprints."""
     used_ports: set[int] = set()
-    if not INVENTORY_DIR.exists():
-        return used_ports
-
     pattern = f"{vmhost}/*/vm.yaml" if vmhost else "*/*/vm.yaml"
-    for yaml_path in INVENTORY_DIR.glob(pattern):
-        try:
-            with open(yaml_path, "r", encoding="utf-8") as f:
-                doc = yaml.safe_load(f) or {}
-            vm_data = doc.get("vm", {})
-            vm_name = vm_data.get("name", yaml_path.parent.name)
-            bp = vm_data.get("blueprint", {})
 
-            # Blueprint default port
-            ext_default = bp.get("proxy_external_port")
-            if ext_default:
-                try:
-                    used_ports.add(int(ext_default))
-                except (ValueError, TypeError):
-                    pass
+    for inv_dir in get_inventory_search_dirs():
+        if not inv_dir.exists():
+            continue
+        for yaml_path in inv_dir.glob(pattern):
+            try:
+                with open(yaml_path, "r", encoding="utf-8") as f:
+                    doc = yaml.safe_load(f) or {}
+                vm_data = doc.get("vm", {})
+                vm_name = vm_data.get("name", yaml_path.parent.name)
+                bp = vm_data.get("blueprint", {})
 
-            # Per-repository ports
-            for repo in bp.get("repositories", []):
-                rname = repo.get("name")
-                if exclude_vm and vm_name == exclude_vm and rname == exclude_app:
-                    # Allow re-allocating or updating the same app
-                    continue
-                p = repo.get("external_port")
-                if p:
+                # Blueprint default port
+                ext_default = bp.get("proxy_external_port")
+                if ext_default:
                     try:
-                        used_ports.add(int(p))
+                        used_ports.add(int(ext_default))
                     except (ValueError, TypeError):
                         pass
-        except Exception:
-            continue
+
+                # Per-repository ports
+                for repo in bp.get("repositories", []):
+                    rname = repo.get("name")
+                    if exclude_vm and vm_name == exclude_vm and rname == exclude_app:
+                        # Allow re-allocating or updating the same app
+                        continue
+                    p = repo.get("external_port")
+                    if p:
+                        try:
+                            used_ports.add(int(p))
+                        except (ValueError, TypeError):
+                            pass
+            except Exception:
+                continue
 
     return used_ports
 

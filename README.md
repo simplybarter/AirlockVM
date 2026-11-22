@@ -27,7 +27,7 @@ By strictly separating software engineering workstations from runtime execution 
 * **Proportional Resource Allocation**: Automatically discovers physical host CPU threads and total RAM, dynamically sizing guest vCPUs (e.g. 50% capacity) and memory (e.g. 25% capacity) to prevent host starvation.
 * **Conflict-Free Network Discovery**: Queries libvirt networks (such as `default` / `virbr0`), inspects active DHCP leases, allocates the next unassigned static IP, and generates unique collision-free MAC addresses (`52:54:00:xx:xx:xx`).
 * **Automated Project-to-VM Naming**: Derives the project name from the repository root folder, auto-generating domain names (`<project>-vm`), service units, and user accounts.
-* **Automated Virtual Machine Deployment (`airlock_deploy`)**: Launches the execution VM using `inventory/{vmhost}/{vm}/vm.yaml` as the Single Source of Truth (SSOT) with strict pre-requisite verification gates, automated cloud-init image seeding, static DHCP reservations, and systemd socket forwarding.
+* **Automated Virtual Machine Deployment (`airlock_deploy`)**: Launches the execution VM using `vm.yaml` as the Single Source of Truth (SSOT)—discovered hierarchically from `~/.airlock/inventory/` or repo `inventory/`—with strict pre-requisite verification gates, automated cloud-init image seeding, static DHCP reservations, and systemd socket forwarding.
 * **Intelligent Code Synchronization (`airlock_rsync`)**: Evaluates project manifests (Python, Node.js, Rust, Go) and generates an optimized `deploy_app_to_airlock.sh` script to deploy ONLY application code to the VM while ignoring local caches and agent files.
 * **Multi-IDE Client Connector (`connect_airlock.sh`)**: One-command client onboarding across VS Code, Cursor, Claude Code, Antigravity, Windsurf, and JetBrains with zero manual JSON edits.
 * **Antigravity AI Agent Skills**: Includes ready-to-use `.agents/skills/airlock_inventory`, `.agents/skills/airlock_configure`, `.agents/skills/airlock_deploy`, and `.agents/skills/airlock_rsync` skills for autonomous agent-driven hypervisor discovery, VM customization, provisioning, and workspace sync.
@@ -87,7 +87,7 @@ By strictly separating software engineering workstations from runtime execution 
 │       └── server.py                        # AirlockVM FastMCP Server (21 declarative tools)
 ├── tests/                                   # Integration & permutation test suites
 │   └── test_integration_permutations.py     # 26-permutation end-to-end test suite
-├── inventory/                               # Documented hypervisors and VMs (git-ignored)
+├── inventory/                               # Documented hypervisors and VMs (repo fallback / ~/.airlock/inventory/)
 │   └── {vmhost}/                            # VM host directory
 │       ├── vmhost.yaml                      # Documented host YAML record
 │       └── {vm}/                            # Virtual machine directory

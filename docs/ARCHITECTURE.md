@@ -70,7 +70,7 @@ flowchart TD
 
 ### Stage 1: Discovery & Documentation (`airlock_inventory`)
 * **Role**: Inspects physical or local hypervisors via SSH or local libvirt, documenting hardware specifications, libvirt virtual networks, storage pools, and existing virtual machine domains.
-* **Artifacts**: Maintains structured YAML records (`inventory/{vmhost}/vmhost.yaml` and `inventory/{vmhost}/{vm}/vm.yaml`).
+* **Artifacts**: Maintains structured YAML records (`vmhost.yaml` and `vm.yaml`) stored in standard persistent user inventory (`~/.airlock/inventory/{vmhost}/`) or repo fallback (`inventory/{vmhost}/`).
 
 ### Stage 2: Configuration & Sizing (`airlock_configure`)
 * **Role**: Parameterizes the single source-of-truth template (`VM.md.template`) to produce an operational runbook (`VM.md`).
