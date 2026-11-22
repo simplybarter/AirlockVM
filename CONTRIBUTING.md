@@ -40,7 +40,7 @@ python3 .agents/skills/airlock_configure/scripts/verify_config.py
 
 ## Guidelines for Changes
 
-* **Keep Scripts Dependency-Free**: Tooling inside `scripts/` must run using only the Python standard library, without requiring external package installations.
+* **Keep Dependencies Minimal**: Tooling inside `scripts/` should rely only on the Python standard library and `PyYAML` (`pyyaml`) for inventory YAML parsing.
 * **Maintain Portability**: Avoid hardcoding specific machine names, hostnames, user accounts, or private network IPs. Use dynamic detection or relative paths.
 * **Test Both Local and Remote Probing**: When modifying `scripts/probe_hypervisor.py`, test discovery against `localhost` as well as remote SSH hosts.
 
