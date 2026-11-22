@@ -1,0 +1,44 @@
+name: AirlockVM CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package in editable mode
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run deterministic unit and integration test suite
+        run: python -m unittest discover -s tests -v
+
+      - name: Verify runbook and inventory templates
+        run: |
+          python .agents/skills/airlock_configure/scripts/verify_config.py
+          python .agents/skills/airlock_inventory/scripts/verify_config.py
+
+      - name: Portability invariant check (no hardcoded local paths)
+        run: |
+          if grep -rnE '(/home/|/Users/)' src/ docs/ tests/ .agents/ *.sh README.md QUICKSTART.md USECASE.md CONTRIBUTING.md; then
+            echo "ERROR: Hardcoded local user path detected!"
+            exit 1
+          fi
+          echo "Portability check passed."

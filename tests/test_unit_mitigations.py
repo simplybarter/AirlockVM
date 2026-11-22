@@ -289,6 +289,136 @@ class TestMitigationsUnit(unittest.TestCase):
         for expected in (".env.production", "id_rsa", "id_ed25519", ".cursor/", ".codeium/", ".mcp.json", ".svn/", ".hg/"):
             self.assertIn(expected, exclusions)
 
+        # Verify pipe/quote-safe base64 encoding of post_deploy and </dev/null on nohup
+        script = sync_mod.generate_shell_script(
+            "demo-vm",
+            [{
+                "name": "my-app",
+                "local_path": "../my-app",
+                "remote_path": "~/my-app/",
+                "post_deploy": 'python3 -c "print(1)" | tee out.log',
+                "internal_port": 8080,
+                "external_port": 8081,
+            }],
+            list(exclusions),
+        )
+        self.assertIn("</dev/null", script)
+        self.assertIn("base64 -d", script)
+        # Ensure literal pipe inside post_deploy does not appear raw inside REPOSITORIES entry
+        self.assertNotIn('| tee out.log|8080|8081', script)
+
+    def test_add_vmhost_preserves_repositories_and_escapes_yaml(self):
+        add_mod = _load_module(
+            "add_vmhost_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_inventory" / "scripts" / "add_vmhost.py",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inv = Path(tmpdir)
+            vm_dir = inv / "remotehost" / "multi-app-vm"
+            vm_dir.mkdir(parents=True)
+            repos_orig = [
+                {
+                    "name": "api",
+                    "local_path": "../api",
+                    "remote_path": "~/api/",
+                    "internal_port": 8000,
+                    "external_port": 8001,
+                    "post_deploy": 'python3 -c "print(1)"',
+                },
+                {
+                    "name": "web",
+                    "local_path": "../web",
+                    "remote_path": "~/web/",
+                    "internal_port": 3000,
+                    "external_port": 3001,
+                    "post_deploy": "npm start",
+                },
+            ]
+            (vm_dir / "vm.yaml").write_text(
+                yaml.safe_dump({
+                    "vm": {
+                        "name": "multi-app-vm",
+                        "host": "remotehost",
+                        "blueprint": {
+                            "project_name": "MultiApp",
+                            "repositories": repos_orig,
+                        },
+                    }
+                }),
+                encoding="utf-8",
+            )
+            bp = add_mod.derive_vm_blueprint("multi-app-vm", "remotehost", inv)
+            self.assertEqual(len(bp.get("repositories", [])), 2)
+            self.assertEqual(bp["repositories"][0]["post_deploy"], 'python3 -c "print(1)"')
+
+            # Verify rendered repositories YAML parses cleanly with yaml.safe_load
+            rendered_repos = add_mod.render_repositories_yaml({"name": "multi-app-vm"}, bp)
+            parsed = yaml.safe_load("repositories:\n" + rendered_repos)
+            self.assertEqual(len(parsed["repositories"]), 2)
+            self.assertEqual(parsed["repositories"][0]["post_deploy"], 'python3 -c "print(1)"')
+
+            # Verify remote SSH uses shlex.join
+            with patch.object(add_mod.subprocess, "run", return_value=MagicMock(returncode=0, stdout="", stderr="")) as mock_run:
+                add_mod.run_cmd(["grep", "-E", "(vmx|svm)", "/proc/cpuinfo"], host="remotehost")
+                called_cmd = mock_run.call_args[0][0]
+                self.assertIn("'(vmx|svm)'", called_cmd[-1])
+
+    def test_probe_hypervisor_quotes_remote_ssh_commands(self):
+        probe_mod = _load_module(
+            "probe_hypervisor_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_configure" / "scripts" / "probe_hypervisor.py",
+        )
+        with patch.object(probe_mod.subprocess, "run", return_value=MagicMock(returncode=0, stdout="", stderr="")) as mock_run:
+            probe_mod.run_cmd_status(["grep", "-E", "-m1", "(vmx|svm)", "/proc/cpuinfo"], host="remotehost")
+            called_cmd = mock_run.call_args[0][0]
+            self.assertIn("StrictHostKeyChecking=accept-new", called_cmd)
+            self.assertIn("'(vmx|svm)'", called_cmd[-1])
+
+    def test_configure_vm_layers_ssot_resources_and_network(self):
+        conf_mod = _load_module(
+            "configure_vm_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_configure" / "scripts" / "configure_vm.py",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inv = Path(tmpdir)
+            host_dir = inv / "remotehost"
+            vm_dir = host_dir / "custom-vm"
+            vm_dir.mkdir(parents=True)
+            (host_dir / "vmhost.yaml").write_text(
+                yaml.safe_dump({
+                    "vmhost": {
+                        "hardware": {"cpu": {"total_cores": 16}, "memory": {"total_mib": 32768, "total_gb": 32}},
+                        "virtualization": {"networks": [{"name": "default", "bridge": "virbr0", "ip": "10.99.0.1", "netmask": "255.255.255.0"}]},
+                    }
+                }),
+                encoding="utf-8",
+            )
+            (vm_dir / "vm.yaml").write_text(
+                yaml.safe_dump({
+                    "vm": {
+                        "name": "custom-vm",
+                        "host": "remotehost",
+                        "resources": {"vcpu": 3, "memory_mib": 6144},
+                        "network": {"interfaces": [{"ip": "10.99.0.42", "mac": "52:54:00:de:ad:be"}]},
+                        "blueprint": {"project_name": "CustomApp"},
+                    }
+                }),
+                encoding="utf-8",
+            )
+            old_env = os.environ.get("AIRLOCK_INVENTORY_DIR")
+            os.environ["AIRLOCK_INVENTORY_DIR"] = str(inv)
+            try:
+                data = conf_mod.load_from_inventory("remotehost", AIRLOCK_ROOT, target_vm="custom-vm")
+                self.assertEqual(data["VCPU_CORES"], "3")
+                self.assertEqual(data["RAM_MIB"], "6144")
+                self.assertEqual(data["VM_IP"], "10.99.0.42")
+                self.assertEqual(data["VM_MAC"], "52:54:00:de:ad:be")
+            finally:
+                if old_env is not None:
+                    os.environ["AIRLOCK_INVENTORY_DIR"] = old_env
+                else:
+                    os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
+
 
 if __name__ == "__main__":
     unittest.main()
