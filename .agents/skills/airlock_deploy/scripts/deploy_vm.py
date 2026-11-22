@@ -567,14 +567,18 @@ def setup_hypervisor_proxy(params: dict, host: str, dry_run: bool = False) -> No
         socket_path = f"/etc/systemd/system/{unit_name}.socket"
         service_path = f"/etc/systemd/system/{unit_name}.service"
 
-        print(f"[*] Configuring hypervisor proxy for '{label}' on {host} (port {ext_port} -> {vm_ip}:{int_port})...")
+        # Determine listen address: if running directly on localhost, bind strictly to 127.0.0.1 (loopback)
+        # to prevent exposing the port to the physical LAN. Remote hypervisors bind to 0.0.0.0 so clients can reach it.
+        listen_address = "127.0.0.1" if host in ("localhost", "127.0.0.1") else "0.0.0.0"
+
+        print(f"[*] Configuring hypervisor proxy for '{label}' on {host} (port {listen_address}:{ext_port} -> {vm_ip}:{int_port})...")
 
         socket_content = f"""[Unit]
 Description=AirlockVM Proxy Socket for {label} ({vm_name})
 PartOf={unit_name}.service
 
 [Socket]
-ListenStream=0.0.0.0:{ext_port}
+ListenStream={listen_address}:{ext_port}
 
 [Install]
 WantedBy=sockets.target
@@ -589,7 +593,7 @@ ExecStart=/lib/systemd/systemd-socket-proxyd {vm_ip}:{int_port}
 """
 
         if dry_run:
-            print(f"    [PLAN] Configure {socket_path}")
+            print(f"    [PLAN] Configure {socket_path} (ListenStream={listen_address}:{ext_port})")
             print(f"    [PLAN] Configure {service_path}")
             print(f"    [PLAN] sudo systemctl daemon-reload && sudo systemctl enable --now {unit_name}.socket")
             continue

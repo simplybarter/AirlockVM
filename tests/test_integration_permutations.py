@@ -344,6 +344,36 @@ class TestPermutationG_SecurityIsolation(unittest.TestCase):
         self.assertIn(sec.get("verdict"), ("PASS", "SECURE"))
         self.assertEqual(sec.get("violations_count"), 0)
 
+    def test_proxy_socket_bind_localhost_vs_remote(self):
+        """Verifies localhost proxy binds to 127.0.0.1 while remote binds to 0.0.0.0."""
+        import io
+        from contextlib import redirect_stdout
+        import importlib.util
+
+        deploy_script = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py"
+        spec = importlib.util.spec_from_file_location("deploy_vm_test", deploy_script)
+        deploy_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(deploy_mod)
+
+        params = {
+            "VM_NAME": "test-sec-vm",
+            "VM_IP": "192.168.122.99",
+            "PROXY_EXTERNAL_PORT": "3001",
+            "APP_INTERNAL_PORT": "3000",
+        }
+
+        # Localhost must bind strictly to 127.0.0.1
+        f_local = io.StringIO()
+        with redirect_stdout(f_local):
+            deploy_mod.setup_hypervisor_proxy(params, "localhost", dry_run=True)
+        self.assertIn("ListenStream=127.0.0.1:3001", f_local.getvalue())
+
+        # Remote hypervisor must bind to 0.0.0.0 for LAN/network access
+        f_remote = io.StringIO()
+        with redirect_stdout(f_remote):
+            deploy_mod.setup_hypervisor_proxy(params, "remotehost", dry_run=True)
+        self.assertIn("ListenStream=0.0.0.0:3001", f_remote.getvalue())
+
 
 class TestPermutationH_ClientConnectorCLI(unittest.TestCase):
     """Permutation H: Tests multi-IDE client connector CLI script."""

@@ -47,21 +47,25 @@ Because the hypervisor proxy forwards raw TCP packets transparently, authenticat
 
 ---
 
-## 2. Default Network Exposure & Risks
+## 2. Default Network Exposure & Binding Architecture
 
-When `airlock_deploy_vm` (or `deploy_vm.py`) sets up hypervisor port forwarding, the generated systemd socket unit (`/etc/systemd/system/{vm_name}-p{ext_port}-proxy.socket`) configures:
+When `airlock_deploy_vm` (or `deploy_vm.py`) sets up hypervisor port forwarding, the generated systemd socket unit (`/etc/systemd/system/{vm_name}-p{ext_port}-proxy.socket`) dynamically selects its binding interface based on the target hypervisor:
 
+### 1. Localhost Deployments (`vmhost = localhost` or `127.0.0.1`)
+```ini
+[Socket]
+ListenStream=127.0.0.1:3001
+```
+* **Strict Loopback Isolation**: Automatically binds exclusively to `127.0.0.1`.
+* **Zero LAN Exposure**: Connections from external physical networks (Wi-Fi, Ethernet) are dropped by the Linux kernel. Only local processes and your local browser can access `http://localhost:3001`.
+
+### 2. Remote Hypervisor Deployments (`vmhost = remotehost`)
 ```ini
 [Socket]
 ListenStream=0.0.0.0:3001
 ```
-
-### Implications of `0.0.0.0` Binding
-
-* **Localhost Deployments (`vmhost = localhost`)**: The port is accessible to any process or browser on your local machine. If your machine is connected to a local area network (LAN), any device on that LAN that can route to your IP address can reach the application port unless blocked by host firewall rules.
-* **Remote Hypervisor Deployments (`vmhost = remotehost`)**: The port is accessible to any device on the network that can reach the physical hypervisor host on port `3001`.
-
-If your workload runs without application-level authentication, anyone on your physical network could interact with the application server.
+* **LAN / Network Reachable**: Binds to `0.0.0.0` so client workstations across the network can access `http://remotehost:3001`.
+* **Lockdown Recommendation**: On untrusted physical LANs, apply the access lockdown patterns below (Loopback + SSH tunnel, UFW firewall, or reverse proxy auth gateway).
 
 ---
 
@@ -284,7 +288,7 @@ Or via MCP agent tool call:
 | Hardening Objective | Recommended Implementation | Default Out-of-the-Box |
 | :--- | :--- | :--- |
 | **Proxy Authentication** | Application-level JWT / OAuth or Reverse Proxy with Basic Auth | Unauthenticated Layer 4 TCP proxy |
-| **Proxy Network Binding** | Bind to `127.0.0.1` (SSH tunnel) or Tailscale IP (`100.x.y.z`) | `0.0.0.0` (all IPv4 interfaces on host) |
+| **Proxy Network Binding** | Bind to `127.0.0.1` (SSH tunnel) or Tailscale IP (`100.x.y.z`) | `127.0.0.1` (localhost) / `0.0.0.0` (remotehost) |
 | **Host Firewall** | UFW / nftables rule restricting port to workstation IP | Open to hypervisor's reachable LAN |
 | **Secrets & Keys** | Excluded via `airlock_rsync` exclusion engine | Strictly excluded from guest sync |
 | **Workstation Sandboxing** | All application processes execute in KVM guest | Zero workstation runtime processes |
