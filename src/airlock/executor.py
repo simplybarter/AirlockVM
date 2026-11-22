@@ -58,13 +58,22 @@ def exec_in_vm(
         return {"success": False, "vm_name": safe_vm, "error": f"VM '{safe_vm}' not found in inventory."}
 
     bp = doc.get("vm", {}).get("blueprint", {})
-    effective_workdir = (workdir or "").strip() or str(bp.get("remote_code_dir", "~"))
+    explicit_workdir = (workdir or "").strip()
+    effective_workdir = explicit_workdir or str(bp.get("remote_code_dir", "~"))
     safe_timeout = max(1, min(int(timeout), MAX_EXEC_TIMEOUT))
 
     cmd_b64 = base64.b64encode(command.encode("utf-8")).decode("ascii")
     workdir_expr = _safe_workdir_expr(effective_workdir)
+    if explicit_workdir:
+        cd_prefix = (
+            f"cd {workdir_expr} || "
+            f"{{ echo {shlex.quote(f'Working directory not found: {explicit_workdir}')} >&2; exit 1; }}; "
+        )
+    else:
+        cd_prefix = f"cd {workdir_expr} 2>/dev/null || cd \"$HOME\"; "
+
     remote_script = (
-        f"cd {workdir_expr} 2>/dev/null || cd \"$HOME\"; "
+        f"{cd_prefix}"
         f"cmd_str=$(printf '%s' {shlex.quote(cmd_b64)} | base64 -d); "
         f"bash -lc \"$cmd_str\""
     )

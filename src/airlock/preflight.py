@@ -191,14 +191,20 @@ def validate_deployment_preflight(vm_name: str) -> dict[str, Any]:
             }
             warnings += 1
 
-        # 8. Base Cloud Image Cached
+        # 8. Base Cloud Image / Golden Image Cached
         check_img_cmd = (
+            "if [ -f /var/lib/libvirt/images/airlock-golden-ubuntu-24.04.qcow2 ]; then echo 'GOLDEN'; exit 0; fi; "
             "for img in /var/lib/libvirt/images/ubuntu-24.04-minimal-cloudimg.img "
             "/var/lib/libvirt/images/noble-server-cloudimg-amd64.img; do "
             "[ -f \"$img\" ] && echo 'CACHED' && exit 0; done; echo 'MISSING'"
         )
         rc, out, err = _ssh_cmd(vmhost, check_img_cmd)
-        if rc == 0 and "CACHED" in out:
+        if rc == 0 and "GOLDEN" in out:
+            checks["base_image_cached"] = {
+                "status": "PASS",
+                "message": "Pre-baked golden image cached on hypervisor (fast-boot enabled)",
+            }
+        elif rc == 0 and "CACHED" in out:
             checks["base_image_cached"] = {"status": "PASS", "message": "Ubuntu 24.04 minimal cloud image is cached on hypervisor"}
         else:
             checks["base_image_cached"] = {

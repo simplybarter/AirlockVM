@@ -484,9 +484,18 @@ class TestMitigationsUnit(unittest.TestCase):
                 self.assertEqual(res["returncode"], 0)
                 self.assertEqual(res["stdout"], "42 passed")
                 self.assertEqual(res["workdir"], "~/my-app/")
-                # Verify base64 transport is used
+                # Verify base64 transport is used and omitted workdir falls back to $HOME
                 called_script = mock_guest.call_args[0][1]
                 self.assertIn("base64 -d", called_script)
+                self.assertIn('|| cd "$HOME"', called_script)
+
+                # Explicit workdir must fail fast (no silent fallback to $HOME)
+                with patch("airlock.executor.run_guest_cmd", return_value=(1, "", "Working directory not found")) as mock_explicit:
+                    res_exp = exec_in_vm("exec-vm", "ls", workdir="/nonexistent/dir")
+                self.assertFalse(res_exp["success"])
+                exp_script = mock_explicit.call_args[0][1]
+                self.assertNotIn('|| cd "$HOME"', exp_script)
+                self.assertIn("exit 1", exp_script)
 
                 # Invalid VM name rejected
                 bad = exec_in_vm("bad;vm", "ls")
