@@ -305,14 +305,14 @@ If any check fails, the tool stops immediately and displays actionable troublesh
 
 ## Integration Testing & Permutation Matrix
 
-AirlockVM includes a full 34-permutation integration test suite covering observability, stack detection, placement, dedicated VM lifecycles, shared attach idempotency, drift detection, diagnostics, security isolation, multi-IDE CLI connectors, and live hypervisor proxy reachability:
+AirlockVM includes a full 40-permutation integration test suite (plus deterministic unit tests) covering observability, stack detection, placement, dedicated VM lifecycles, shared attach idempotency, drift detection, diagnostics, security isolation, multi-IDE CLI connectors, and live hypervisor proxy reachability:
 
 ```bash
 # Run the complete test suite:
-.venv/bin/python -m unittest tests/test_integration_permutations.py -v
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
-See the [Integration Testing Guide](docs/INTEGRATION_TESTING.md) for the complete 26-permutation matrix and fixture details.
+See the [Integration Testing Guide](docs/INTEGRATION_TESTING.md) for the complete 40-permutation matrix and fixture details.
 
 ---
 

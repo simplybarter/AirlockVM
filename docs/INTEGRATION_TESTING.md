@@ -138,7 +138,7 @@ AirlockVM supports two deployment models established via conversation between th
 
 ## 5. Permutation Test Matrix & Verification Results
 
-All 39 test permutations across 10 dimensions are executed in `.venv/bin/python -m unittest tests/test_integration_permutations.py -v`:
+All 40 test permutations across 10 dimensions are executed in `.venv/bin/python -m unittest tests/test_integration_permutations.py -v` (set `AIRLOCK_LIVE_TESTS=1` to include live hypervisor checks):
 
 | Dimension | Permutation / Test Case | Tool / Engine | Result | Details |
 | :--- | :--- | :--- | :---: | :--- |

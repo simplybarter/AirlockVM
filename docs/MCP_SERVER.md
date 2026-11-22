@@ -181,7 +181,7 @@ AirlockVM enforces strict security boundaries between the developer workstation,
 
 ## 6. Integration Testing & Permutation Coverage
 
-Every tool and sub-engine exposed by the AirlockVM MCP Server is verified through an automated 39-permutation test suite (`tests/test_integration_permutations.py`):
+Every tool and sub-engine exposed by the AirlockVM MCP Server is verified through an automated 40-permutation test suite (`tests/test_integration_permutations.py`) and deterministic unit tests (`tests/test_unit_mitigations.py`):
 
 ```bash
 # Execute full MCP server permutation suite:

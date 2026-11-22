@@ -245,11 +245,11 @@ flowchart TD
 * **Copy-on-Write (`qcow2`) Disks**: Virtual machine storage uses `qcow2` sparse files with dynamic allocation.
 * **Pristine Snapshot Baselines**: Before running untrusted agent tasks, complex builds, or destructive test suites, take an instant snapshot:
   ```bash
-  airlock snapshot --vm <vm_name> --action create --name baseline-clean
+  airlock snapshot <vm_name> create baseline-clean
   ```
 * **Instant Rollback**: If packages or configurations become corrupted or untrusted state is introduced:
   ```bash
-  airlock snapshot --vm <vm_name> --action rollback --name baseline-clean
+  airlock snapshot <vm_name> revert baseline-clean
   ```
   The disk state reverts immediately to the pristine baseline.
 
@@ -260,7 +260,7 @@ flowchart TD
 AirlockVM includes an autonomous security auditing engine accessible via the CLI and the MCP control plane:
 
 ```bash
-airlock audit-security --vm <vm_name>
+airlock audit-security <vm_name>
 ```
 
 Or via MCP agent tool call:

@@ -35,7 +35,7 @@ To prevent configuration drift, ambiguity, and redundancy, AirlockVM establishes
 | **`docs/ARCHITECTURE.md`** | **System Architecture & Isolation Model:** Two-tier hypervisor topology, resource budgeting (vCPU/RAM), `qcow2` storage, socket proxying, and credential zero-leak boundaries. |
 | **`docs/SECURITY.md`** | **Security & Proxy Isolation Model:** Layer 4 socket proxy mechanics, authentication boundaries, credential zero-leak invariants, and hypervisor hardening. |
 | **`docs/MCP_SERVER.md`** | **MCP Protocol & Tooling Specification:** Detailed JSON schemas, tools, subcommands, arguments, and return types for the `airlock-mcp` Model Context Protocol control plane. |
-| **`docs/INTEGRATION_TESTING.md`** | **End-to-End Verification Matrix:** 26-permutation verification lifecycle, multi-IDE connector validation, test fixtures (`DummyAirlockApp`), and automated rollback testing. |
+| **`docs/INTEGRATION_TESTING.md`** | **End-to-End Verification Matrix:** 40-permutation verification lifecycle, multi-IDE connector validation, test fixtures (`DummyAirlockApp`), and automated rollback testing. |
 | **`USECASE.md`** | **Operational Problem Space & Solutions:** Motivation, developer pain points, container escape risks, and real-world deployment patterns. |
 | **`README.md`** | **Project Overview & Quickstart:** Architecture highlights, quick installation, CLI usage, and quick reference guide. |
 
@@ -81,10 +81,9 @@ The Model Context Protocol control plane exposes a complete tool suite for codin
    * `airlock_detect_app(local_path)`: Analyzes project manifests (`package.json`, `pyproject.toml`, `requirements.txt`, `Dockerfile`, `.env`) to auto-infer frameworks, internal ports, and startup commands.
 
 3. **Hypervisor Placement & Networking**:
-   * `airlock_inspect_hypervisor(vmhost)`: Probes hardware topology, RAM availability, and active bridge networks.
-   * `airlock_select_hypervisor(required_vcpu, required_memory_mib)`: Selects the optimal hypervisor based on resource headroom.
-   * `airlock_allocate_network(vmhost)`: Automatically allocates the next clean static IP and collision-free MAC on `virbr0`.
-   * `airlock_allocate_port(vmhost, internal_port, preferred_port)`: Allocates collision-free host proxy ports.
+   * `airlock_select_host(required_vcpu, required_ram_mib, required_disk_gb)`: Audits registered hypervisors and selects the optimal host based on CPU, RAM, and disk headroom.
+   * `airlock_alloc_network(vmhost, network_name)`: Automatically allocates the next clean static IP and collision-free MAC on `virbr0`.
+   * `airlock_find_port(vm_name, internal_port, preferred_port, vmhost)`: Allocates collision-free host proxy ports.
 
 4. **Lifecycle Topologies**:
    * `airlock_create_vm(...)`: Provisions a dedicated virtual machine domain (`vm.yaml`, `VM.md`, deployment scripts).
@@ -132,7 +131,7 @@ AirlockVM includes a unified client connector script (`connect_airlock.sh`) to o
   ```bash
   .venv/bin/python -m unittest tests/test_integration_permutations.py
   ```
-* **Deterministic Verification**: Any modification to the control plane, skills, or CLI must pass the 26-permutation integration test suite (`tests/test_integration_permutations.py`).
+* **Deterministic Verification**: Any modification to the control plane, skills, or CLI must pass the integration permutation suite (`tests/test_integration_permutations.py`) and deterministic unit tests (`tests/test_unit_mitigations.py`).
 * **Zero Host Pollution**: Temporary test files must be cleaned up in test fixture `tearDown()` blocks.
 
 ---
