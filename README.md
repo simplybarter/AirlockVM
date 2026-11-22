@@ -138,11 +138,28 @@ For manual MCP integration or agent harnesses, configure `.gemini/mcp_config.jso
 
 * Python 3.14 or higher.
 * Linux host with KVM/QEMU and `libvirtd` (either running locally or accessible over SSH).
-* AirlockVM Python virtual environment configured:
-  ```bash
-  python3.14 -m venv .venv
-  .venv/bin/pip install -e .
-  ```
+
+### Installation
+
+#### Option 1: Standard User Tool Installation (`~/.local/bin/`) — Recommended
+Installs `airlock` and `airlock-mcp` into an isolated user tool environment via `uv tool` or `pipx`:
+
+```bash
+# Standard isolated installation:
+./install_mcp_server.sh
+
+# Or install in editable mode for active development:
+./install_mcp_server.sh --editable
+
+# Install and automatically configure all IDE agent connectors:
+./install_mcp_server.sh --connect
+```
+
+#### Option 2: Local Repository Virtual Environment
+```bash
+python3.14 -m venv .venv
+.venv/bin/pip install -e .
+```
 
 ### Unified `airlock` CLI
 

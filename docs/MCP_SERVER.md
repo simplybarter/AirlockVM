@@ -58,6 +58,7 @@ The AirlockVM MCP Server runs in an isolated Python virtual environment configur
 * **MCP SDK**: `mcp>=2.3.0` (`mcp.server.mcpserver.MCPServer`)
 * **Transport**: Standard I/O (`stdio`), enabling zero-network local agent execution with immediate lifecycle termination when the agent disconnects.
 * **Console Entry Point**: `airlock-mcp` (points to `airlock.mcp.server:main`)
+* **Standard Installation**: Run `./install_mcp_server.sh` to install `airlock-mcp` into `~/.local/bin/` via `uv tool` or `pipx`.
 
 ---
 
