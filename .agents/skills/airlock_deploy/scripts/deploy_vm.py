@@ -11,6 +11,7 @@ Enforces two strict pre-flight gates:
 
 import argparse
 import base64
+import getpass
 import ipaddress
 import json
 import os
@@ -247,7 +248,7 @@ def parse_runbook(doc_path: Path) -> dict[str, str]:
         "VIRT_BRIDGE": extract(r"virtual bridge\s*`([^`]+)`", "virbr0"),
         "LIBVIRT_NETWORK": extract(r"libvirt\s*`([^`]+)`\s*net", "default"),
         "VM_PRIMARY_USER": extract(r"\|\s*\*\*Primary User\*\*\s*\|\s*`([^`]+)`", "airlock"),
-        "VM_SECONDARY_USER": extract(r"\|\s*\*\*Secondary User\*\*\s*\|\s*`([^`]+)`", "mother"),
+        "VM_SECONDARY_USER": extract(r"\|\s*\*\*Secondary User\*\*\s*\|\s*`([^`]+)`", getpass.getuser()),
         "SSH_KEY_PATH": extract(r"\*\*Private Key\*\*:\s*`([^`]+)`", "~/.ssh/airlock_vm_ed25519"),
         "PROXY_SOCKET_SERVICE": extract(r"\*\*Service Definition\*\*:\s*`([^`]+)`", "/etc/systemd/system/airlock-proxy.socket"),
         "PROXY_EXTERNAL_PORT": extract(r"received on port `(\d+)` to port", "3001"),

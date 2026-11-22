@@ -7,6 +7,7 @@ execution virtual machines and application workloads.
 from __future__ import annotations
 
 import datetime
+import getpass
 import os
 from pathlib import Path
 import re
@@ -538,7 +539,7 @@ def airlock_create_vm(
             "blueprint": {
                 "project_name": app_name,
                 "primary_user": "airlock",
-                "secondary_user": "mother",
+                "secondary_user": getpass.getuser(),
                 "ssh_key_path": f"~/.ssh/{slug}_vm_ed25519",
                 "app_internal_port": internal_port,
                 "proxy_external_port": allocated_port,

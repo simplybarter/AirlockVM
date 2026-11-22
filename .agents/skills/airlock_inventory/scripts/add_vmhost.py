@@ -11,6 +11,7 @@ defined YAML templates, and persists the documented files into:
 
 import argparse
 import datetime
+import getpass
 import ipaddress
 import json
 import os
@@ -339,7 +340,7 @@ def derive_vm_blueprint(vm_name: str, host: str, inventory_root: Path) -> dict:
                 return {
                     "project_name": bp.get("project_name"),
                     "primary_user": bp.get("primary_user", "airlock"),
-                    "secondary_user": bp.get("secondary_user", "mother"),
+                    "secondary_user": bp.get("secondary_user", getpass.getuser()),
                     "ssh_key_path": bp.get("ssh_key_path", f"~/.ssh/{vm_name}_ed25519"),
                     "app_internal_port": str(bp.get("app_internal_port", 3000)),
                     "proxy_external_port": str(bp.get("proxy_external_port", 3001)),
@@ -393,7 +394,7 @@ def derive_vm_blueprint(vm_name: str, host: str, inventory_root: Path) -> dict:
     return {
         "project_name": proj_name,
         "primary_user": prim_user,
-        "secondary_user": "mother",
+        "secondary_user": getpass.getuser(),
         "ssh_key_path": f"~/.ssh/{prim_user}_vm_ed25519",
         "app_internal_port": int_port,
         "proxy_external_port": ext_port,
@@ -692,9 +693,11 @@ def render_repositories_yaml(vm_data: dict, bp: dict) -> str:
     if not repos:
         proj_name = bp.get("project_name", vm_data.get("name", "AirlockVM"))
         remote_dest = bp.get("remote_code_dir", f"~/{proj_name}/")
+        candidate_dir = Path.cwd().parent / proj_name
+        local_p = str(candidate_dir.resolve()) if candidate_dir.exists() else f"../{proj_name}"
         repos = [{
             "name": proj_name,
-            "local_path": f"/home/mother/projects/priv/2026/{proj_name}",
+            "local_path": local_p,
             "remote_path": remote_dest,
             "internal_port": default_int,
             "external_port": default_ext,
@@ -762,7 +765,7 @@ def render_vm_yaml(vm_data: dict, template_path: Path) -> str:
     replacements.update({
         "BLUEPRINT_PROJECT_NAME": bp.get("project_name", "AirlockVM"),
         "BLUEPRINT_PRIMARY_USER": bp.get("primary_user", "airlock"),
-        "BLUEPRINT_SECONDARY_USER": bp.get("secondary_user", "mother"),
+        "BLUEPRINT_SECONDARY_USER": bp.get("secondary_user", getpass.getuser()),
         "BLUEPRINT_SSH_KEY_PATH": bp.get("ssh_key_path", "~/.ssh/airlock_vm_ed25519"),
         "BLUEPRINT_APP_INTERNAL_PORT": str(bp.get("app_internal_port", 3000)),
         "BLUEPRINT_PROXY_EXTERNAL_PORT": str(bp.get("proxy_external_port", 3001)),
@@ -826,7 +829,7 @@ def render_vm_runbook(vm_data: dict, host_data: dict, template_path: Path) -> st
         "LIBVIRT_NETWORK": "default",
         "VM_MAC": primary_mac,
         "VM_PRIMARY_USER": bp.get("primary_user", "airlock"),
-        "VM_SECONDARY_USER": bp.get("secondary_user", "mother"),
+        "VM_SECONDARY_USER": bp.get("secondary_user", getpass.getuser()),
         "SSH_KEY_PATH": bp.get("ssh_key_path", f"~/.ssh/{bp.get('primary_user', 'airlock')}_vm_ed25519"),
         "APP_INTERNAL_PORT": str(bp.get("app_internal_port", 3000)),
         "PROXY_EXTERNAL_PORT": str(bp.get("proxy_external_port", 3001)),
