@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
-import subprocess
 from typing import Any
 import yaml
 
 from airlock.inventory import get_inventory_search_dirs, get_primary_inventory_dir
+from airlock.transport import run_host_cmd
 
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
 INVENTORY_DIR = get_primary_inventory_dir()
@@ -67,43 +67,18 @@ def get_inventory_used_ports(
 def get_hypervisor_live_ports(vmhost: str, timeout: int = 4) -> set[int]:
     """Queries live listening TCP ports on the hypervisor host over SSH or locally."""
     live_ports: set[int] = set()
-    if not vmhost or vmhost in ("localhost", "127.0.0.1"):
-        cmd = ["ss", "-tlnH"]
-    else:
-        cmd = [
-            "ssh",
-            "-o",
-            "ConnectTimeout=3",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "StrictHostKeyChecking=no",
-            vmhost,
-            "ss -tlnH",
-        ]
-
-    try:
-        proc = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-        if proc.returncode == 0:
-            for line in proc.stdout.splitlines():
-                parts = line.strip().split()
-                if len(parts) >= 4:
-                    local_addr = parts[3]
-                    match = re.search(r":(\d+)$", local_addr)
-                    if match:
-                        try:
-                            live_ports.add(int(match.group(1)))
-                        except ValueError:
-                            pass
-    except Exception:
-        pass
+    rc, stdout, _ = run_host_cmd(vmhost, ["ss", "-tlnH"], timeout=timeout)
+    if rc == 0:
+        for line in stdout.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 4:
+                local_addr = parts[3]
+                match = re.search(r":(\d+)$", local_addr)
+                if match:
+                    try:
+                        live_ports.add(int(match.group(1)))
+                    except ValueError:
+                        pass
 
     return live_ports
 
@@ -140,14 +115,18 @@ def allocate_external_port(
 
     # Base candidate selection
     if internal_port in (80, 443):
-        candidate = 8080
-    elif 1024 <= internal_port < 65530:
-        candidate = internal_port + 1
+        start_port = 8080
+    elif 1024 <= internal_port < 65535:
+        start_port = internal_port + 1
     else:
-        candidate = 3001
+        start_port = 3001
 
-    # Scan for next free port
-    while candidate in all_occupied or candidate < 1024 or candidate > 65535:
-        candidate += 1
+    # Bounded scan: start_port..65535, then wrap around 1025..start_port-1
+    for candidate in range(start_port, 65536):
+        if candidate not in all_occupied:
+            return candidate, f"{prefix}automatically allocated available external port {candidate} on {vmhost}."
+    for candidate in range(1025, start_port):
+        if candidate not in all_occupied:
+            return candidate, f"{prefix}automatically allocated available external port {candidate} on {vmhost}."
 
-    return candidate, f"{prefix}automatically allocated available external port {candidate} on {vmhost}."
+    raise RuntimeError(f"No available unprivileged TCP ports (1025-65535) remaining on hypervisor '{vmhost}'.")

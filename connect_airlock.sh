@@ -341,17 +341,22 @@ if [[ "$ACTION" != "list" ]]; then
   fi
 fi
 
-# Execute Multi-Target Update via Python
-"$AIRLOCK_PYTHON" - <<PYEOF
+# Execute Multi-Target Update via Python (passing values via environment variables to avoid shell interpolation bugs)
+AIRLOCK_RAW_TARGETS="$(printf '%s\n' "${CONFIG_TARGETS[@]}")" \
+AIRLOCK_ACTION="$ACTION" \
+AIRLOCK_DRY_RUN="$DRY_RUN" \
+AIRLOCK_COMMAND_PATH="$COMMAND_PATH" \
+AIRLOCK_ARGS_LIST="$ARGS_LIST" \
+"$AIRLOCK_PYTHON" - <<'PYEOF'
 import json
 import os
 import sys
 
-raw_targets = """$(printf '%s\n' "${CONFIG_TARGETS[@]}")""".strip().splitlines()
-action = """$ACTION"""
-dry_run = str("""$DRY_RUN""").lower() in ("true", "1", "yes")
-command_path = """$COMMAND_PATH"""
-args_list = json.loads("""$ARGS_LIST""")
+raw_targets = os.environ.get("AIRLOCK_RAW_TARGETS", "").strip().splitlines()
+action = os.environ.get("AIRLOCK_ACTION", "add")
+dry_run = os.environ.get("AIRLOCK_DRY_RUN", "false").lower() in ("true", "1", "yes")
+command_path = os.environ.get("AIRLOCK_COMMAND_PATH", "")
+args_list = json.loads(os.environ.get("AIRLOCK_ARGS_LIST", "[]"))
 
 server_entry = {"command": command_path}
 if args_list:

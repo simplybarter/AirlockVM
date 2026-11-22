@@ -40,8 +40,15 @@ def allocate_vm_network(
     netmask = target_net.get("netmask", "255.255.255.0") if target_net else "255.255.255.0"
     bridge = target_net.get("bridge", "virbr0") if target_net else "virbr0"
 
+    # Calculate base subnet
+    network_cidr = ipaddress.IPv4Network(f"{gateway_ip}/{netmask}", strict=False)
+
     # Collect all used IPs and MACs across inventory for this vmhost
-    used_ips: set[str] = {gateway_ip, "192.168.122.0", "192.168.122.255"}
+    used_ips: set[str] = {
+        gateway_ip,
+        str(network_cidr.network_address),
+        str(network_cidr.broadcast_address),
+    }
     used_macs: set[str] = set()
 
     for inv_dir in get_inventory_search_dirs():
@@ -72,20 +79,21 @@ def allocate_vm_network(
             if res.get("mac"):
                 used_macs.add(str(res["mac"]).strip().lower())
 
-    # Calculate base subnet
-    network_cidr = ipaddress.IPv4Network(f"{gateway_ip}/{netmask}", strict=False)
-
-    # Search for next available IP starting from high DHCP pool (e.g. .230 -> .254) or ascending from .10
+    # Search for next available IP prioritizing high static range (.230-.253 within the subnet)
     allocated_ip = None
-    # Prioritize typical airlock static range .230-.250
-    preferred_candidates = [f"192.168.122.{i}" for i in range(230, 254)]
+    all_hosts = list(network_cidr.hosts())
+    if len(all_hosts) >= 253:
+        preferred_candidates = [str(ip) for ip in all_hosts[229:253]]
+    else:
+        preferred_candidates = [str(ip) for ip in all_hosts[-24:]]
+
     for cand in preferred_candidates:
         if cand not in used_ips:
             allocated_ip = cand
             break
 
     if not allocated_ip:
-        for host in network_cidr.hosts():
+        for host in all_hosts:
             cand = str(host)
             if cand not in used_ips:
                 allocated_ip = cand

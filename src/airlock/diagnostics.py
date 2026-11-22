@@ -9,62 +9,23 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
-import subprocess
+import shlex
 from typing import Any
 import yaml
 
 from airlock.inventory import find_vm_yaml, get_primary_inventory_dir
+from airlock.transport import run_guest_cmd, run_host_cmd
 
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
 INVENTORY_DIR = get_primary_inventory_dir()
 
 
 def _ssh_guest(vm_name: str, cmd: str, timeout: int = 5) -> tuple[int, str, str]:
-    full_cmd = [
-        "ssh",
-        "-o", "BatchMode=yes",
-        "-o", f"ConnectTimeout={timeout}",
-        "-o", "StrictHostKeyChecking=no",
-        vm_name,
-        cmd,
-    ]
-    try:
-        proc = subprocess.run(
-            full_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-        )
-        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
-    except subprocess.TimeoutExpired:
-        return 124, "", f"Guest command timed out: {cmd}"
-    except Exception as e:
-        return 1, "", str(e)
+    return run_guest_cmd(vm_name, cmd, timeout=timeout)
 
 
 def _ssh_host(host: str, cmd: str, timeout: int = 5) -> tuple[int, str, str]:
-    full_cmd = [
-        "ssh",
-        "-o", "BatchMode=yes",
-        "-o", f"ConnectTimeout={timeout}",
-        "-o", "StrictHostKeyChecking=accept-new",
-        host,
-        cmd,
-    ]
-    try:
-        proc = subprocess.run(
-            full_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-        )
-        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
-    except subprocess.TimeoutExpired:
-        return 124, "", f"Host command timed out: {cmd}"
-    except Exception as e:
-        return 1, "", str(e)
+    return run_host_cmd(host, cmd, timeout=timeout)
 
 
 def _find_vm_yaml(vm_name: str) -> tuple[Path | None, dict[str, Any] | None]:
@@ -88,7 +49,8 @@ def diagnose_workload_failure(vm_name: str, app_name: str = "") -> dict[str, Any
     suggested_action = "Review application logs."
 
     # 1. Hypervisor domain power state
-    rc, dom_state, _ = _ssh_host(vmhost, f"sudo virsh domstate {vm_name} 2>/dev/null")
+    q_vm = shlex.quote(vm_name)
+    rc, dom_state, _ = _ssh_host(vmhost, f"sudo virsh domstate {q_vm} 2>/dev/null")
     if rc != 0 or not dom_state:
         findings.append("VM domain is not registered or virsh is inaccessible on hypervisor.")
         root_cause = "DOMAIN_NOT_FOUND"
@@ -101,8 +63,9 @@ def diagnose_workload_failure(vm_name: str, app_name: str = "") -> dict[str, Any
         findings.append(f"VM domain is active in state '{dom_state}'.")
 
         # 2. Hypervisor proxy socket unit status
-        socket_unit = f"{vm_name}-p{ext_port}-proxy.socket"
-        rc_sock, sock_out, _ = _ssh_host(vmhost, f"systemctl is-active {socket_unit} 2>/dev/null || echo 'inactive'")
+        socket_unit = f"{vm_name}-p{int(ext_port)}-proxy.socket"
+        q_sock = shlex.quote(socket_unit)
+        rc_sock, sock_out, _ = _ssh_host(vmhost, f"systemctl is-active {q_sock} 2>/dev/null || echo 'inactive'")
         if sock_out != "active":
             findings.append(f"Hypervisor proxy socket unit '{socket_unit}' is '{sock_out}'.")
             if root_cause == "UNKNOWN":
@@ -112,7 +75,7 @@ def diagnose_workload_failure(vm_name: str, app_name: str = "") -> dict[str, Any
             findings.append(f"Hypervisor proxy socket unit '{socket_unit}' is active.")
 
         # 3. Guest internal socket listening check
-        rc_ss, ss_out, _ = _ssh_guest(vm_name, f"ss -tlnH | grep -E ':{int_port}\\b' || echo 'NOT_LISTENING'")
+        rc_ss, ss_out, _ = _ssh_guest(vm_name, f"ss -tlnH | grep -E ':{int(int_port)}\\b' || echo 'NOT_LISTENING'")
         if "NOT_LISTENING" in ss_out:
             findings.append(f"No process inside the guest VM is listening on internal port {int_port}.")
             if root_cause == "UNKNOWN":

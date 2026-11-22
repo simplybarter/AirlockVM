@@ -89,6 +89,8 @@ def evaluate_project_exclusions() -> list[str]:
     exclusions = [
         # Version control & repository metadata
         ".git/",
+        ".svn/",
+        ".hg/",
         ".github/",
         ".gitignore",
         ".gitattributes",
@@ -96,6 +98,9 @@ def evaluate_project_exclusions() -> list[str]:
         ".agents/",
         ".gemini/",
         ".claude/",
+        ".cursor/",
+        ".codeium/",
+        ".mcp.json",
         # IDE, Editor, and OS cache
         ".vscode/",
         ".idea/",
@@ -116,53 +121,44 @@ def evaluate_project_exclusions() -> list[str]:
         "sync_to_airlock.sh",
         "install_skill.sh",
         "connect_airlock.sh",
-        # Local secrets and environment overrides
+        # Local secrets, private keys, and environment overrides
         ".env*.local",
+        ".env.production",
         "*.local.json",
         "my_*.json",
         "*.pem",
         "*.key",
+        "id_rsa",
+        "id_ed25519",
     ]
 
-    # Detect language / framework-specific build artifacts & dependencies
-    has_python = any(REPO_ROOT.glob("*.py")) or (REPO_ROOT / "requirements.txt").exists() or (REPO_ROOT / "pyproject.toml").exists()
-    has_node = (REPO_ROOT / "package.json").exists()
-    has_rust = (REPO_ROOT / "Cargo.toml").exists()
-    has_go = (REPO_ROOT / "go.mod").exists()
-
-    # Python exclusions
-    if has_python or True:
-        exclusions.extend([
-            "__pycache__/",
-            "*.py[cod]",
-            "*.class",
-            "venv/",
-            ".venv/",
-            "env/",
-            "ENV/",
-            ".pytest_cache/",
-            ".mypy_cache/",
-            ".ruff_cache/",
-            ".tox/",
-            "dist/",
-            "*.egg-info/",
-        ])
-
-    # Node.js / Web exclusions
-    if has_node or True:
-        exclusions.extend([
-            "node_modules/",
-            ".next/",
-            ".nuxt/",
-            ".turbo/",
-            "out/",
-            "build/",
-            ".cache/",
-            ".pnpm-store/",
-        ])
+    # Always exclude common Python and Node.js cache/build artifacts across polyglot workspaces
+    exclusions.extend([
+        "__pycache__/",
+        "*.py[cod]",
+        "*.class",
+        "venv/",
+        ".venv/",
+        "env/",
+        "ENV/",
+        ".pytest_cache/",
+        ".mypy_cache/",
+        ".ruff_cache/",
+        ".tox/",
+        "dist/",
+        "*.egg-info/",
+        "node_modules/",
+        ".next/",
+        ".nuxt/",
+        ".turbo/",
+        "out/",
+        "build/",
+        ".cache/",
+        ".pnpm-store/",
+    ])
 
     # Rust exclusions
-    if has_rust:
+    if (REPO_ROOT / "Cargo.toml").exists():
         exclusions.append("target/")
 
     # Remove duplicates preserving order

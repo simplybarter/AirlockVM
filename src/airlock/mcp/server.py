@@ -38,19 +38,19 @@ from airlock.preflight import validate_deployment_preflight
 from airlock.profiler import profile_workload
 from airlock.security import audit_vm_security
 from airlock.snapshots import create_pre_deploy_checkpoint, rollback_checkpoint
+from airlock.transport import get_python_bin, resolve_asset_path, validate_identifier
 
-# AirlockVM canonical root directory and primary inventory directory
+# AirlockVM canonical root directory and script resolution
 AIRLOCK_ROOT = Path(__file__).resolve().parents[3]
-INVENTORY_DIR = get_primary_inventory_dir()
-DEPLOY_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py"
-CONFIGURE_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_configure" / "scripts" / "configure_vm.py"
-GENERATE_SYNC_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_rsync" / "scripts" / "generate_sync.py"
-ROOT_DISPATCHER = AIRLOCK_ROOT / "deploy_app_to_airlock.sh"
-if not ROOT_DISPATCHER.exists() and (AIRLOCK_ROOT / "deploy_app_to_vm.sh").exists():
-    ROOT_DISPATCHER = AIRLOCK_ROOT / "deploy_app_to_vm.sh"
-PYTHON_BIN = AIRLOCK_ROOT / ".venv" / "bin" / "python"
-if not PYTHON_BIN.exists():
-    PYTHON_BIN = Path(sys.executable)
+DEPLOY_SCRIPT = resolve_asset_path(".agents/skills/airlock_deploy/scripts/deploy_vm.py", AIRLOCK_ROOT)
+CONFIGURE_SCRIPT = resolve_asset_path(".agents/skills/airlock_configure/scripts/configure_vm.py", AIRLOCK_ROOT)
+GENERATE_SYNC_SCRIPT = resolve_asset_path(".agents/skills/airlock_rsync/scripts/generate_sync.py", AIRLOCK_ROOT)
+ROOT_DISPATCHER = resolve_asset_path("deploy_app_to_airlock.sh", AIRLOCK_ROOT)
+if not ROOT_DISPATCHER.exists():
+    legacy_disp = resolve_asset_path("deploy_app_to_vm.sh", AIRLOCK_ROOT)
+    if legacy_disp.exists():
+        ROOT_DISPATCHER = legacy_disp
+PYTHON_BIN = get_python_bin(AIRLOCK_ROOT)
 
 server = MCPServer("airlock")
 
@@ -477,7 +477,7 @@ def airlock_create_vm(
         exclude_app=app_name,
     )
 
-    vm_dir = INVENTORY_DIR / vmhost / vm_name
+    vm_dir = get_primary_inventory_dir(ensure_exists=True) / vmhost / vm_name
     vm_dir.mkdir(parents=True, exist_ok=True)
     yaml_path = vm_dir / "vm.yaml"
     runbook_path = vm_dir / "VM.md"
@@ -590,6 +590,12 @@ def airlock_create_vm(
     sync_cmd = [str(PYTHON_BIN), str(GENERATE_SYNC_SCRIPT)]
     sync_res = _run_command(sync_cmd)
 
+    warnings: list[str] = []
+    if not conf_res.get("success"):
+        warnings.append(f"Runbook generation failed: {conf_res.get('stderr') or conf_res.get('stdout')}")
+    if not sync_res.get("success"):
+        warnings.append(f"Sync script generation failed: {sync_res.get('stderr') or sync_res.get('stdout')}")
+
     return {
         "success": True,
         "vm_name": vm_name,
@@ -605,7 +611,10 @@ def airlock_create_vm(
         "post_deploy": post_deploy,
         "detected_profile": detection,
         "port_allocation_message": alloc_reason,
+        "runbook_generated": bool(conf_res.get("success")),
+        "sync_generated": bool(sync_res.get("success")),
         "sync_generator": sync_res.get("stdout", ""),
+        "warnings": warnings,
         "message": f"Successfully created dedicated VM '{vm_name}' for '{app_name}' on '{vmhost}'.",
     }
 

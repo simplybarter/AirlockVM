@@ -9,42 +9,35 @@ Enforces zero-workload workstation invariants and sandboxing guardrails:
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 import subprocess
 from typing import Any
 import yaml
 
 from airlock.inventory import find_vm_yaml, get_primary_inventory_dir
+from airlock.transport import run_guest_cmd
 
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
 INVENTORY_DIR = get_primary_inventory_dir()
 
 
 def _ssh_guest(vm_name: str, cmd: str, timeout: int = 5) -> tuple[int, str, str]:
-    full_cmd = [
-        "ssh",
-        "-o", "BatchMode=yes",
-        "-o", f"ConnectTimeout={timeout}",
-        "-o", "StrictHostKeyChecking=no",
-        vm_name,
-        cmd,
-    ]
-    try:
-        proc = subprocess.run(
-            full_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-        )
-        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
-    except subprocess.TimeoutExpired:
-        return 124, "", f"Guest command timed out: {cmd}"
-    except Exception as e:
-        return 1, "", str(e)
+    return run_guest_cmd(vm_name, cmd, timeout=timeout)
 
 
 def _find_vm_yaml(vm_name: str) -> tuple[Path | None, dict[str, Any] | None]:
     return find_vm_yaml(vm_name)
+
+
+def _safe_remote_dir_expr(remote_dir: str) -> str:
+    """Safely quotes a remote directory path while preserving leading ~ expansion."""
+    cleaned = (remote_dir or "~/").strip()
+    if cleaned == "~" or cleaned == "~/":
+        return '"$HOME"'
+    if cleaned.startswith("~/"):
+        suffix = cleaned[2:]
+        return f'"$HOME"/{shlex.quote(suffix)}'
+    return shlex.quote(cleaned)
 
 
 def audit_vm_security(vm_name: str, app_name: str = "") -> dict[str, Any]:
@@ -56,24 +49,35 @@ def audit_vm_security(vm_name: str, app_name: str = "") -> dict[str, Any]:
     vm_data = doc.get("vm", {})
     vmhost = vm_data.get("host", "remotehost")
     bp = vm_data.get("blueprint", {})
-    remote_dir = bp.get("remote_code_dir", "~/").replace("~", "$HOME")
+    remote_dir_raw = bp.get("remote_code_dir", "~/")
+    remote_dir_expr = _safe_remote_dir_expr(remote_dir_raw)
 
     findings = []
     violations = 0
+    unverified = False
 
     # 1. Check for secret leaks / forbidden exclusions on guest VM
     leak_check_cmd = (
-        f"find {remote_dir} -maxdepth 3 \\( "
+        f"find {remote_dir_expr} -maxdepth 3 \\( "
         "-name '.git' -o "
         "-name '.env*.local' -o "
+        "-name '.env.production' -o "
         "-name '*.pem' -o "
         "-name '*.key' -o "
         "-name 'id_rsa' -o "
         "-name 'id_ed25519' "
         "\\) 2>/dev/null"
     )
-    rc, leaks, _ = _ssh_guest(vm_name, leak_check_cmd)
-    if rc == 0 and leaks.strip():
+    rc, leaks, err = _ssh_guest(vm_name, leak_check_cmd)
+    if rc != 0:
+        findings.append({
+            "check": "secret_leak_audit",
+            "status": "UNVERIFIED",
+            "detail": f"Unable to audit guest VM '{vm_name}' over SSH ({err or f'exit code {rc}'}). Fail-closed: cannot confirm zero credential leaks.",
+            "severity": "high",
+        })
+        unverified = True
+    elif leaks.strip():
         leaked_files = leaks.strip().splitlines()
         findings.append({
             "check": "secret_leak_audit",
@@ -86,23 +90,31 @@ def audit_vm_security(vm_name: str, app_name: str = "") -> dict[str, Any]:
         findings.append({
             "check": "secret_leak_audit",
             "status": "PASS",
-            "detail": f"Zero credentials, SSH keys, or .git repositories present in guest directory ({remote_dir}).",
+            "detail": f"Zero credentials, SSH keys, or .git repositories present in guest directory ({remote_dir_raw}).",
             "severity": "none",
         })
 
     # 2. Check hypervisor confinement status
     sec = vm_data.get("security", {})
-    apparmor = sec.get("apparmor_profile", "unconfined")
+    apparmor = str(sec.get("apparmor_profile", "unconfined"))
+    is_confined = "unconfined" not in apparmor.lower()
     findings.append({
         "check": "hypervisor_confinement",
-        "status": "PASS" if "unconfined" not in apparmor else "INFO",
-        "detail": f"Libvirt security profile: '{apparmor}'. AppArmor isolation is active.",
-        "severity": "none" if "unconfined" not in apparmor else "info",
+        "status": "PASS" if is_confined else "INFO",
+        "detail": (
+            f"Libvirt security profile: '{apparmor}'. AppArmor/SELinux confinement is active."
+            if is_confined
+            else f"Libvirt security profile: '{apparmor}'. Domain is unconfined; consider enabling AppArmor/SELinux confinement."
+        ),
+        "severity": "none" if is_confined else "info",
     })
 
     # 3. Workstation Zero-Workload Invariant
-    # Audit local workstation processes to ensure node/python application workloads are not running on localhost
-    local_workload_cmd = "pgrep -fa 'server\\.js' 2>/dev/null | grep -v -E 'antigravity|cursor|code|ide' || true"
+    # Audit local workstation processes to ensure application runtimes are not running locally
+    local_workload_cmd = (
+        "pgrep -fa '(server\\.js|uvicorn|gunicorn|flask run|manage\\.py runserver|vite|next dev|next start)' "
+        "2>/dev/null | grep -v -E 'antigravity|cursor|code|ide|pgrep' || true"
+    )
     proc = subprocess.run(["bash", "-c", local_workload_cmd], stdout=subprocess.PIPE, text=True)
     local_procs = proc.stdout.strip()
     if local_procs:
@@ -120,8 +132,13 @@ def audit_vm_security(vm_name: str, app_name: str = "") -> dict[str, Any]:
             "severity": "none",
         })
 
-    compliant = violations == 0
-    verdict = "SECURE" if compliant else "VIOLATION_DETECTED"
+    compliant = violations == 0 and not unverified
+    if violations > 0:
+        verdict = "VIOLATION_DETECTED"
+    elif unverified:
+        verdict = "UNVERIFIED"
+    else:
+        verdict = "SECURE"
 
     return {
         "success": True,

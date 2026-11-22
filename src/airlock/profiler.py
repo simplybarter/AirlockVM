@@ -8,39 +8,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import subprocess
 import time
 from typing import Any
 import yaml
 
 from airlock.inventory import find_vm_yaml, get_primary_inventory_dir
+from airlock.transport import run_guest_cmd
 
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
 INVENTORY_DIR = get_primary_inventory_dir()
 
 
 def _ssh_guest(vm_name: str, cmd: str, timeout: int = 5) -> tuple[int, str, str]:
-    full_cmd = [
-        "ssh",
-        "-o", "BatchMode=yes",
-        "-o", f"ConnectTimeout={timeout}",
-        "-o", "StrictHostKeyChecking=no",
-        vm_name,
-        cmd,
-    ]
-    try:
-        proc = subprocess.run(
-            full_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-        )
-        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
-    except subprocess.TimeoutExpired:
-        return 124, "", f"Guest command timed out: {cmd}"
-    except Exception as e:
-        return 1, "", str(e)
+    return run_guest_cmd(vm_name, cmd, timeout=timeout)
 
 
 def _find_vm_yaml(vm_name: str) -> tuple[Path | None, dict[str, Any] | None]:

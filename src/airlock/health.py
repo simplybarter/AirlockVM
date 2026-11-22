@@ -7,10 +7,11 @@ captures runtime crash logs from the guest VM if deployment fails.
 from __future__ import annotations
 
 import http.client
-import subprocess
 import time
 from typing import Any
 import urllib.parse
+
+from airlock.transport import run_guest_cmd
 
 
 def verify_route_health(
@@ -54,17 +55,13 @@ def verify_route_health(
     if vm_name:
         try:
             # Query recent systemd/journal logs or dmesg inside the VM
-            diag_cmd = [
-                "ssh",
-                "-o", "ConnectTimeout=3",
-                "-o", "BatchMode=yes",
-                "-o", "StrictHostKeyChecking=no",
+            _, stdout, _ = run_guest_cmd(
                 vm_name,
                 "journalctl -n 25 --no-pager 2>/dev/null || dmesg | tail -n 25",
-            ]
-            proc = subprocess.run(diag_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
-            if proc.stdout.strip():
-                diagnostics.append(proc.stdout.strip())
+                timeout=5,
+            )
+            if stdout:
+                diagnostics.append(stdout)
         except Exception:
             pass
 

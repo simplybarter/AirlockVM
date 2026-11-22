@@ -427,6 +427,18 @@ def generate_cloud_init_seed(params: dict, pub_key: str, seed_iso_path: str, hos
 local-hostname: {params['VM_NAME']}
 """
 
+    secondary_user = (params.get("VM_SECONDARY_USER") or "").strip()
+    secondary_block = ""
+    if secondary_user and secondary_user != params["VM_PRIMARY_USER"]:
+        secondary_block = f"""  - name: {secondary_user}
+    gecos: AirlockVM Secondary User
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    groups: [sudo, docker]
+    ssh_authorized_keys:
+      - {pub_key}
+"""
+
     user_data = f"""#cloud-config
 hostname: {params['VM_NAME']}
 users:
@@ -437,14 +449,7 @@ users:
     groups: [sudo, docker]
     ssh_authorized_keys:
       - {pub_key}
-  - name: {params['VM_SECONDARY_USER']}
-    gecos: AirlockVM Secondary User
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    shell: /bin/bash
-    groups: [sudo, docker]
-    ssh_authorized_keys:
-      - {pub_key}
-
+{secondary_block}
 packages:
   - docker.io
   - containerd
@@ -583,12 +588,22 @@ ListenStream={listen_address}:{ext_port}
 WantedBy=sockets.target
 """
 
+        # Resolve systemd-socket-proxyd binary path across distros (/usr/lib vs /lib)
+        proxyd_bin = "/usr/lib/systemd/systemd-socket-proxyd"
+        if not dry_run:
+            ret_p, out_p, _ = run_cmd_status(
+                ["bash", "-c", "for p in /usr/lib/systemd/systemd-socket-proxyd /lib/systemd/systemd-socket-proxyd; do [ -x \"$p\" ] && echo \"$p\" && exit 0; done; echo /lib/systemd/systemd-socket-proxyd"],
+                host=host,
+            )
+            if ret_p == 0 and out_p:
+                proxyd_bin = out_p.splitlines()[0].strip()
+
         service_content = f"""[Unit]
 Description=AirlockVM Proxy Service for {label} ({vm_name})
 After=network.target
 
 [Service]
-ExecStart=/lib/systemd/systemd-socket-proxyd {vm_ip}:{int_port}
+ExecStart={proxyd_bin} {vm_ip}:{int_port}
 """
 
         if dry_run:
@@ -832,6 +847,47 @@ def sync_inventory_record(params: dict, action: str = "update", dry_run: bool = 
                 print(f"    [PLAN] python3 {inventory_script} {host} --vm {vm_name}")
 
 
+def execute_snapshot(params: dict, host: str, snapshot_name: str = "default", dry_run: bool = False) -> int:
+    """Creates a disk-only snapshot on the target VM domain."""
+    vm_name = params["VM_NAME"]
+    snap_name = params.get("SNAPSHOT_BASE_NAME", "snapshot-base-clean") if snapshot_name in ("", "default") else snapshot_name
+    snap_desc = f"AirlockVM snapshot '{snap_name}'"
+    cmd = [
+        "sudo", "virsh", "snapshot-create-as",
+        "--domain", vm_name,
+        "--name", snap_name,
+        "--disk-only",
+        "--description", snap_desc,
+    ]
+    print(f"[*] Creating snapshot '{snap_name}' for domain '{vm_name}' on {host}...")
+    if dry_run:
+        print(f"    [PLAN] {' '.join(cmd)}")
+        return 0
+    ret, out, err = run_cmd_status(cmd, host=host)
+    if ret != 0:
+        print(f"[-] Error creating snapshot '{snap_name}': {err}", file=sys.stderr)
+        return 1
+    print(f"[✓] Snapshot '{snap_name}' created successfully: {out or 'OK'}")
+    return 0
+
+
+def execute_rollback(params: dict, host: str, snapshot_name: str = "default", dry_run: bool = False) -> int:
+    """Reverts a VM domain to a named or baseline snapshot."""
+    vm_name = params["VM_NAME"]
+    snap_name = params.get("SNAPSHOT_BASE_NAME", "snapshot-base-clean") if snapshot_name in ("", "default") else snapshot_name
+    cmd = ["sudo", "virsh", "snapshot-revert", "--domain", vm_name, "--snapshotname", snap_name]
+    print(f"[*] Reverting domain '{vm_name}' on {host} to snapshot '{snap_name}'...")
+    if dry_run:
+        print(f"    [PLAN] {' '.join(cmd)}")
+        return 0
+    ret, out, err = run_cmd_status(cmd, host=host)
+    if ret != 0:
+        print(f"[-] Error reverting to snapshot '{snap_name}': {err}", file=sys.stderr)
+        return 1
+    print(f"[✓] Domain '{vm_name}' reverted to snapshot '{snap_name}': {out or 'OK'}")
+    return 0
+
+
 def execute_power_action(params: dict, action: str) -> None:
     """Controls VM lifecycle (start, stop, reboot, destroy)."""
     vm_name = params["VM_NAME"]
@@ -1011,6 +1067,12 @@ def main():
         execute_power_action(params, "reboot")
         sys.exit(0)
 
+    # Handle snapshot / rollback actions
+    if args.snapshot is not None:
+        sys.exit(execute_snapshot(params, host, snapshot_name=args.snapshot, dry_run=args.dry_run))
+    if args.rollback is not None:
+        sys.exit(execute_rollback(params, host, snapshot_name=args.rollback, dry_run=args.dry_run))
+
     # Handle validate-proxy action
     if args.validate_proxy:
         ok, _ = validate_proxy_connection(params, dry_run=args.dry_run)
@@ -1053,6 +1115,8 @@ def main():
                 execute_power_action(params, "start")
             else:
                 print(f"    [PLAN] sudo virsh start {vm_name}")
+        # Ensure all configured repository proxy forwarders are active on the hypervisor
+        setup_hypervisor_proxy(params, host, dry_run=args.dry_run)
         execute_status(params)
         sys.exit(0)
 

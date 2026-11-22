@@ -11,17 +11,21 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
+from airlock.transport import get_python_bin, resolve_asset_path, validate_identifier
+
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py"
-PYTHON_BIN = AIRLOCK_ROOT / ".venv" / "bin" / "python"
+DEPLOY_SCRIPT = resolve_asset_path(".agents/skills/airlock_deploy/scripts/deploy_vm.py", AIRLOCK_ROOT)
+PYTHON_BIN = get_python_bin(AIRLOCK_ROOT)
 
 
 def create_pre_deploy_checkpoint(vm_name: str, tag_prefix: str = "snap-pre-deploy") -> dict[str, Any]:
     """Creates a timestamped snapshot baseline before running application deployments."""
+    safe_vm = validate_identifier(vm_name, "VM name")
+    safe_prefix = validate_identifier(tag_prefix, "snapshot tag prefix")
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    snapshot_name = f"{tag_prefix}-{timestamp}"
+    snapshot_name = f"{safe_prefix}-{timestamp}"
 
-    cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", vm_name, "--snapshot", snapshot_name]
+    cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", safe_vm, "--snapshot", snapshot_name]
     try:
         proc = subprocess.run(cmd, cwd=AIRLOCK_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
         return {
@@ -42,9 +46,10 @@ def create_pre_deploy_checkpoint(vm_name: str, tag_prefix: str = "snap-pre-deplo
 
 def rollback_checkpoint(vm_name: str, snapshot_name: str = "") -> dict[str, Any]:
     """Reverts a VM to a designated checkpoint or baseline snapshot."""
-    cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", vm_name, "--rollback"]
+    safe_vm = validate_identifier(vm_name, "VM name")
+    cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", safe_vm, "--rollback"]
     if snapshot_name:
-        cmd.append(snapshot_name)
+        cmd.append(validate_identifier(snapshot_name, "snapshot name"))
 
     try:
         proc = subprocess.run(cmd, cwd=AIRLOCK_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)

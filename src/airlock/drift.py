@@ -8,46 +8,25 @@ and offers automated reconciliation.
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 import subprocess
 from typing import Any
 import xml.etree.ElementTree as ET
 import yaml
 
 from airlock.inventory import find_vm_yaml, get_primary_inventory_dir
+from airlock.transport import get_python_bin, resolve_asset_path, run_host_cmd
 
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
 INVENTORY_DIR = get_primary_inventory_dir()
-ADD_HOST_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_inventory" / "scripts" / "add_vmhost.py"
-DEPLOY_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py"
+ADD_HOST_SCRIPT = resolve_asset_path(".agents/skills/airlock_inventory/scripts/add_vmhost.py", AIRLOCK_ROOT)
+DEPLOY_SCRIPT = resolve_asset_path(".agents/skills/airlock_deploy/scripts/deploy_vm.py", AIRLOCK_ROOT)
+PYTHON_BIN = get_python_bin(AIRLOCK_ROOT)
 
 
 def _ssh_cmd(host: str, command: str, timeout: int = 5) -> tuple[int, str, str]:
     """Executes a command locally or on a remote hypervisor via SSH."""
-    if not host or host in ("localhost", "127.0.0.1"):
-        full_cmd = ["bash", "-c", command]
-    else:
-        full_cmd = [
-            "ssh",
-            "-o", "BatchMode=yes",
-            "-o", f"ConnectTimeout={timeout}",
-            "-o", "StrictHostKeyChecking=accept-new",
-            host,
-            command,
-        ]
-
-    try:
-        proc = subprocess.run(
-            full_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-        )
-        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
-    except subprocess.TimeoutExpired:
-        return 124, "", f"Command timed out after {timeout}s: {command}"
-    except Exception as e:
-        return 1, "", str(e)
+    return run_host_cmd(host, command, timeout=timeout)
 
 
 def _find_vm_yaml(vm_name: str) -> tuple[Path | None, dict[str, Any] | None]:
@@ -70,7 +49,8 @@ def audit_vm_drift(vm_name: str) -> dict[str, Any]:
     expected_proxy_port = bp.get("proxy_external_port")
 
     # 1. Query live libvirt domain
-    rc, xml_str, _ = _ssh_cmd(vmhost, f"sudo virsh dumpxml {vm_name} 2>/dev/null")
+    q_vm = shlex.quote(vm_name)
+    rc, xml_str, _ = _ssh_cmd(vmhost, f"sudo virsh dumpxml {q_vm} 2>/dev/null")
     domain_defined = rc == 0 and bool(xml_str.strip())
 
     drift_items: list[dict[str, Any]] = []
@@ -113,7 +93,7 @@ def audit_vm_drift(vm_name: str) -> dict[str, Any]:
                 })
 
             # Check live execution state
-            rc_st, live_state, _ = _ssh_cmd(vmhost, f"sudo virsh domstate {vm_name} 2>/dev/null")
+            rc_st, live_state, _ = _ssh_cmd(vmhost, f"sudo virsh domstate {q_vm} 2>/dev/null")
             if rc_st == 0 and live_state:
                 norm_live = live_state.lower().strip()
                 norm_exp = expected_state.lower().strip()
@@ -138,9 +118,8 @@ def audit_vm_drift(vm_name: str) -> dict[str, Any]:
 
     # 2. Check hypervisor systemd proxy socket state
     if expected_proxy_port:
-        slug = vm_name.replace("-vm", "")
-        socket_unit = f"{vm_name}-p{expected_proxy_port}-proxy.socket"
-        rc_sock, sock_status, _ = _ssh_cmd(vmhost, f"systemctl is-active {socket_unit} 2>/dev/null || echo 'inactive'")
+        socket_unit = f"{vm_name}-p{int(expected_proxy_port)}-proxy.socket"
+        rc_sock, sock_status, _ = _ssh_cmd(vmhost, f"systemctl is-active {shlex.quote(socket_unit)} 2>/dev/null || echo 'inactive'")
         if sock_status != "active" and expected_state == "running":
             drift_items.append({
                 "category": "proxy",
@@ -182,7 +161,7 @@ def reconcile_vm_drift(vm_name: str, strategy: str = "refresh_inventory") -> dic
     vmhost = doc.get("vm", {}).get("host", "remotehost")
 
     if strategy == "refresh_inventory":
-        cmd = ["python3", str(ADD_HOST_SCRIPT), vmhost, "--vm", vm_name]
+        cmd = [str(PYTHON_BIN), str(ADD_HOST_SCRIPT), vmhost, "--vm", vm_name]
         proc = subprocess.run(cmd, cwd=AIRLOCK_ROOT, capture_output=True, text=True)
         return {
             "success": proc.returncode == 0,
@@ -193,7 +172,7 @@ def reconcile_vm_drift(vm_name: str, strategy: str = "refresh_inventory") -> dic
             "message": f"Refreshed inventory record for '{vm_name}' from live hypervisor.",
         }
     elif strategy == "enforce_specification":
-        cmd = ["python3", str(DEPLOY_SCRIPT), "--vm", vm_name, "--yes"]
+        cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", vm_name, "--yes"]
         proc = subprocess.run(cmd, cwd=AIRLOCK_ROOT, capture_output=True, text=True)
         return {
             "success": proc.returncode == 0,

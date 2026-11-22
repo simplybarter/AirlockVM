@@ -7,11 +7,11 @@ to automatically recommend or select the optimal hypervisor host for new VMs or 
 from __future__ import annotations
 
 from pathlib import Path
-import subprocess
 from typing import Any
 import yaml
 
 from airlock.inventory import find_vmhost_yaml, get_inventory_search_dirs, get_primary_inventory_dir
+from airlock.transport import run_host_cmd
 
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
 INVENTORY_DIR = get_primary_inventory_dir()
@@ -41,20 +41,12 @@ def inspect_hypervisor(vmhost: str) -> dict[str, Any]:
     conn_type = conn.get("type", "ssh")
     remote_host = conn.get("host", vmhost)
 
-    if conn_type == "ssh":
+    if conn_type in ("ssh", "local"):
         try:
-            cmd = [
-                "ssh",
-                "-o", "ConnectTimeout=3",
-                "-o", "BatchMode=yes",
-                "-o", "StrictHostKeyChecking=no",
-                remote_host,
-                "uptime && free -m",
-            ]
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=4)
-            if proc.returncode == 0:
+            rc, stdout, _ = run_host_cmd(remote_host, "uptime && free -m", timeout=4)
+            if rc == 0 and stdout:
                 live_probe = True
-                lines = proc.stdout.splitlines()
+                lines = stdout.splitlines()
                 # Parse load average from uptime line
                 if lines:
                     uptime_line = lines[0]
@@ -109,12 +101,15 @@ def select_optimal_hypervisor(
     # Score candidates
     scored = []
     for c in candidates:
+        cores = c["total_cores"]
         ram = c["available_ram_mib"]
         disk = c["available_disk_gb"]
         load = c["load_average_1m"]
         running = c["running_vms"]
 
         # Disqualify if insufficient resources
+        if cores < required_vcpu:
+            continue
         if ram < required_ram_mib:
             continue
         if disk < required_disk_gb:

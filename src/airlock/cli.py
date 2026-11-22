@@ -13,25 +13,28 @@ import sys
 from typing import Any
 
 from airlock.mcp.server import (
+    airlock_audit_drift,
+    airlock_audit_security,
+    airlock_diagnose,
     airlock_list,
     airlock_ping,
     airlock_preflight,
+    airlock_snapshot,
     airlock_status,
-    airlock_diagnose,
-    airlock_audit_drift,
 )
+from airlock.transport import get_python_bin, resolve_asset_path, validate_identifier
 
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
-PYTHON_BIN = AIRLOCK_ROOT / ".venv" / "bin" / "python"
-if not PYTHON_BIN.exists():
-    PYTHON_BIN = Path(sys.executable)
+PYTHON_BIN = get_python_bin(AIRLOCK_ROOT)
 
-DEPLOY_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py"
-CONFIGURE_SCRIPT = AIRLOCK_ROOT / ".agents" / "skills" / "airlock_configure" / "scripts" / "configure_vm.py"
-SYNC_DISPATCHER = AIRLOCK_ROOT / "deploy_app_to_airlock.sh"
-if not SYNC_DISPATCHER.exists() and (AIRLOCK_ROOT / "deploy_app_to_vm.sh").exists():
-    SYNC_DISPATCHER = AIRLOCK_ROOT / "deploy_app_to_vm.sh"
-CONNECT_SCRIPT = AIRLOCK_ROOT / "connect_airlock.sh"
+DEPLOY_SCRIPT = resolve_asset_path(".agents/skills/airlock_deploy/scripts/deploy_vm.py", AIRLOCK_ROOT)
+CONFIGURE_SCRIPT = resolve_asset_path(".agents/skills/airlock_configure/scripts/configure_vm.py", AIRLOCK_ROOT)
+SYNC_DISPATCHER = resolve_asset_path("deploy_app_to_airlock.sh", AIRLOCK_ROOT)
+if not SYNC_DISPATCHER.exists():
+    legacy_sync = resolve_asset_path("deploy_app_to_vm.sh", AIRLOCK_ROOT)
+    if legacy_sync.exists():
+        SYNC_DISPATCHER = legacy_sync
+CONNECT_SCRIPT = resolve_asset_path("connect_airlock.sh", AIRLOCK_ROOT)
 
 
 def cmd_ping(args: argparse.Namespace) -> int:
@@ -103,35 +106,49 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 
 def cmd_connect(args: argparse.Namespace) -> int:
-    if not CONNECT_SCRIPT.exists():
-        print(f"Connection helper '{CONNECT_SCRIPT}' not found.", file=sys.stderr)
+    if not args.vm:
+        print("Error: Target VM domain name is required (e.g. 'airlock connect <vm_name>').", file=sys.stderr)
         return 1
 
-    cmd = ["bash", str(CONNECT_SCRIPT)]
-    if args.vm:
-        cmd.append(args.vm)
-    if args.ide:
-        cmd.extend(["--ide", args.ide])
-    proc = subprocess.run(cmd, cwd=AIRLOCK_ROOT)
-    return proc.returncode
+    try:
+        safe_vm = validate_identifier(args.vm, "VM name")
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.ide == "vscode":
+        cmd = ["code", "--remote", f"ssh-remote+{safe_vm}"]
+    elif args.ide == "cursor":
+        cmd = ["cursor", "--remote", f"ssh-remote+{safe_vm}"]
+    else:
+        cmd = ["ssh", safe_vm]
+
+    try:
+        proc = subprocess.run(cmd)
+        return proc.returncode
+    except FileNotFoundError:
+        print(f"Error: Required executable '{cmd[0]}' not found in PATH.", file=sys.stderr)
+        return 1
 
 
 def cmd_preflight(args: argparse.Namespace) -> int:
     res = airlock_preflight(args.vm_name)
+    deployable = bool(res.get("deployable"))
+    verdict = res.get("verdict") or ("READY_TO_DEPLOY" if deployable else "BLOCKED")
     print(f"\nAirlockVM Pre-Flight Audit: {args.vm_name} on {res.get('host', 'unknown')}")
-    print(f"Overall Status: {'PASS' if res.get('success') else 'BLOCKED'}")
+    print(f"Overall Status: {verdict}")
     print(f"Checks: {res.get('passed_checks', 0)}/{res.get('total_checks', 0)} passed\n")
     for name, c in res.get("checks", {}).items():
         status = c.get("status", "UNKNOWN")
         msg = c.get("message", "")
-        symbol = "✓" if status == "PASS" else ("⚠" if status == "WARN" else "✗")
+        symbol = "✓" if status == "PASS" else ("⚠" if status in ("WARN", "SKIPPED") else "✗")
         print(f"  {symbol} [{status}] {name:<22}: {msg}")
     if res.get("remediations"):
         print("\nActionable Remediations:")
         for rem in res.get("remediations", []):
             print(f"  - {rem}")
     print()
-    return 0 if res.get("success") else 1
+    return 0 if deployable else 1
 
 
 def cmd_diagnose(args: argparse.Namespace) -> int:
@@ -148,15 +165,49 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
 
 def cmd_drift(args: argparse.Namespace) -> int:
     res = airlock_audit_drift(args.vm_name)
+    if not res.get("success"):
+        print(f"Error auditing drift for '{args.vm_name}': {res.get('error', 'unknown error')}", file=sys.stderr)
+        return 1
+    has_drift = bool(res.get("has_drift"))
     print(f"\nAirlockVM Drift Audit: {args.vm_name}")
-    print(f"Drift Detected: {'YES' if res.get('drift_detected') else 'NO'}")
-    if res.get("drift_detected"):
-        for item in res.get("drift_items", []):
-            print(f"  - [{item.get('field')}]: Expected '{item.get('expected')}' vs Live '{item.get('live')}'")
+    print(f"Drift Detected: {'YES' if has_drift else 'NO'}")
+    items = res.get("drift_items", [])
+    if items:
+        for item in items:
+            attr = item.get("attribute", item.get("field", "unknown"))
+            expected = item.get("inventory_value", item.get("expected", ""))
+            live = item.get("live_value", item.get("live", ""))
+            print(f"  - [{attr}]: Expected '{expected}' vs Live '{live}'")
     else:
         print("  Domain and hypervisor proxy state match inventory SSOT.")
     print()
     return 0
+
+
+def cmd_snapshot(args: argparse.Namespace) -> int:
+    action = "revert" if args.action == "rollback" else args.action
+    res = airlock_snapshot(args.vm_name, action=action, snapshot_name=args.snapshot_name or "")
+    if not res.get("success"):
+        print(f"Error executing snapshot '{action}' on '{args.vm_name}': {res.get('error') or res.get('stderr', 'unknown error')}", file=sys.stderr)
+        return 1
+    if res.get("stdout"):
+        print(res["stdout"])
+    return 0
+
+
+def cmd_audit_security(args: argparse.Namespace) -> int:
+    res = airlock_audit_security(args.vm_name, app_name=args.app_name or "")
+    if not res.get("success"):
+        print(f"Error auditing security for '{args.vm_name}': {res.get('error', 'unknown error')}", file=sys.stderr)
+        return 1
+    print(f"\nAirlockVM Security Audit: {args.vm_name} on {res.get('host', 'unknown')}")
+    print(f"Verdict: {res.get('verdict', 'UNKNOWN')} (Violations: {res.get('violations_count', 0)})\n")
+    for item in res.get("findings", []):
+        status = item.get("status", "UNKNOWN")
+        symbol = "✓" if status == "PASS" else ("⚠" if status in ("WARN", "INFO") else "✗")
+        print(f"  {symbol} [{status}] {item.get('check', 'check'):<26}: {item.get('detail', '')}")
+    print()
+    return 0 if res.get("compliant") else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -212,6 +263,17 @@ def main(argv: list[str] | None = None) -> int:
     p_drift = subparsers.add_parser("drift", help="Audit configuration drift against inventory SSOT")
     p_drift.add_argument("vm_name", help="Domain name of target VM")
 
+    # snapshot
+    p_snap = subparsers.add_parser("snapshot", help="Create, revert, or list VM disk snapshots")
+    p_snap.add_argument("vm_name", help="Domain name of target VM")
+    p_snap.add_argument("action", choices=["create", "revert", "rollback", "list"], help="Snapshot action")
+    p_snap.add_argument("snapshot_name", nargs="?", default="", help="Optional snapshot name")
+
+    # audit-security
+    p_sec = subparsers.add_parser("audit-security", help="Audit VM credential isolation and workstation zero-workload invariant")
+    p_sec.add_argument("vm_name", help="Domain name of target VM")
+    p_sec.add_argument("--app-name", help="Optional application display name")
+
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
@@ -228,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
         "preflight": cmd_preflight,
         "diagnose": cmd_diagnose,
         "drift": cmd_drift,
+        "snapshot": cmd_snapshot,
+        "audit-security": cmd_audit_security,
     }
 
     handler = commands.get(args.command)
