@@ -22,18 +22,14 @@ from airlock.mcp.server import (
     airlock_snapshot,
     airlock_status,
 )
-from airlock.transport import get_python_bin, resolve_asset_path, validate_identifier
+from airlock.transport import get_python_bin, resolve_asset_path, resolve_sync_dispatcher, validate_identifier
 
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
 PYTHON_BIN = get_python_bin(AIRLOCK_ROOT)
 
 DEPLOY_SCRIPT = resolve_asset_path(".agents/skills/airlock_deploy/scripts/deploy_vm.py", AIRLOCK_ROOT)
 CONFIGURE_SCRIPT = resolve_asset_path(".agents/skills/airlock_configure/scripts/configure_vm.py", AIRLOCK_ROOT)
-SYNC_DISPATCHER = resolve_asset_path("deploy_app_to_airlock.sh", AIRLOCK_ROOT)
-if not SYNC_DISPATCHER.exists():
-    legacy_sync = resolve_asset_path("deploy_app_to_vm.sh", AIRLOCK_ROOT)
-    if legacy_sync.exists():
-        SYNC_DISPATCHER = legacy_sync
+SYNC_DISPATCHER = resolve_sync_dispatcher(AIRLOCK_ROOT)
 CONNECT_SCRIPT = resolve_asset_path("connect_airlock.sh", AIRLOCK_ROOT)
 
 
@@ -90,11 +86,12 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
-    if not SYNC_DISPATCHER.exists():
-        print(f"Sync dispatcher script '{SYNC_DISPATCHER}' not found. Run generate_sync.py first.", file=sys.stderr)
+    dispatcher = resolve_sync_dispatcher(AIRLOCK_ROOT)
+    if not dispatcher.exists():
+        print(f"Sync dispatcher script '{dispatcher}' not found. Run generate_sync.py first.", file=sys.stderr)
         return 1
 
-    cmd = [str(SYNC_DISPATCHER)]
+    cmd = [str(dispatcher)]
     if args.vm:
         cmd.append(args.vm)
     if args.dry_run:

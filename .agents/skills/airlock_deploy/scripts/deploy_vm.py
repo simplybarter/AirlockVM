@@ -312,7 +312,7 @@ Host {params['VM_NAME']}
 
     if ssh_config_file.exists():
         existing_config = ssh_config_file.read_text(encoding="utf-8")
-        if f"Host {params['VM_NAME']}" in existing_config:
+        if re.search(rf"(?m)^\s*Host\s+{re.escape(params['VM_NAME'])}(?:\s|$)", existing_config):
             print(f"    [✓] ~/.ssh/config already contains entry for 'Host {params['VM_NAME']}'")
             return pub_content
 

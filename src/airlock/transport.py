@@ -59,6 +59,20 @@ def resolve_asset_path(relative_path: str, airlock_root: Path | None = None) -> 
     return repo_candidate
 
 
+def resolve_sync_dispatcher(airlock_root: Path | None = None) -> Path:
+    """Resolves the multi-VM sync dispatcher, preferring the user persistent bin location."""
+    user_dispatcher = Path.home() / ".airlock" / "bin" / "deploy_app_to_airlock.sh"
+    if user_dispatcher.exists():
+        return user_dispatcher
+    primary = resolve_asset_path("deploy_app_to_airlock.sh", airlock_root)
+    if primary.exists():
+        return primary
+    legacy = resolve_asset_path("deploy_app_to_vm.sh", airlock_root)
+    if legacy.exists():
+        return legacy
+    return primary
+
+
 def run_host_cmd(
     host: str,
     command: str | list[str],

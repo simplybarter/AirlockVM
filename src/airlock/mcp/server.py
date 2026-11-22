@@ -38,18 +38,14 @@ from airlock.preflight import validate_deployment_preflight
 from airlock.profiler import profile_workload
 from airlock.security import audit_vm_security
 from airlock.snapshots import create_pre_deploy_checkpoint, rollback_checkpoint
-from airlock.transport import get_python_bin, resolve_asset_path, validate_identifier
+from airlock.transport import get_python_bin, resolve_asset_path, resolve_sync_dispatcher, validate_identifier
 
 # AirlockVM canonical root directory and script resolution
 AIRLOCK_ROOT = Path(__file__).resolve().parents[3]
 DEPLOY_SCRIPT = resolve_asset_path(".agents/skills/airlock_deploy/scripts/deploy_vm.py", AIRLOCK_ROOT)
 CONFIGURE_SCRIPT = resolve_asset_path(".agents/skills/airlock_configure/scripts/configure_vm.py", AIRLOCK_ROOT)
 GENERATE_SYNC_SCRIPT = resolve_asset_path(".agents/skills/airlock_rsync/scripts/generate_sync.py", AIRLOCK_ROOT)
-ROOT_DISPATCHER = resolve_asset_path("deploy_app_to_airlock.sh", AIRLOCK_ROOT)
-if not ROOT_DISPATCHER.exists():
-    legacy_disp = resolve_asset_path("deploy_app_to_vm.sh", AIRLOCK_ROOT)
-    if legacy_disp.exists():
-        ROOT_DISPATCHER = legacy_disp
+ROOT_DISPATCHER = resolve_sync_dispatcher(AIRLOCK_ROOT)
 PYTHON_BIN = get_python_bin(AIRLOCK_ROOT)
 
 server = MCPServer("airlock")
@@ -685,12 +681,13 @@ def airlock_attach_app(
     )
     final_external_port = allocated_port
 
+    remote_slug = re.sub(r"[^a-z0-9._-]+", "-", app_name.lower()).strip("-") or "app"
     matched = False
     for r in repos:
         if r.get("name") == app_name or r.get("local_path") == str(resolved_path):
             r["name"] = app_name
             r["local_path"] = str(resolved_path)
-            r["remote_path"] = f"~/{app_name}/"
+            r["remote_path"] = f"~/{remote_slug}/"
             r["internal_port"] = internal_port
             r["external_port"] = final_external_port
             r["post_deploy"] = post_deploy
@@ -701,7 +698,7 @@ def airlock_attach_app(
         repos.append({
             "name": app_name,
             "local_path": str(resolved_path),
-            "remote_path": f"~/{app_name}/",
+            "remote_path": f"~/{remote_slug}/",
             "internal_port": internal_port,
             "external_port": final_external_port,
             "post_deploy": post_deploy,
@@ -796,7 +793,8 @@ def airlock_deploy_app(
     if checkpoint and not dry_run and not offline:
         checkpoint_res = create_pre_deploy_checkpoint(vm_name)
 
-    cmd = [str(ROOT_DISPATCHER), vm_name]
+    dispatcher = resolve_sync_dispatcher(AIRLOCK_ROOT)
+    cmd = [str(dispatcher), vm_name]
     if app_name:
         cmd.extend(["--repo", app_name])
     if dry_run:

@@ -19,7 +19,7 @@ To ensure strict separation of concerns, safety, reproducibility, and system sta
 
 3. **Dedicated {{ PROJECT_NAME }} Guest VM (`{{ VM_NAME }}`) on `{{ HYPERVISOR_HOST }}`**:
    * **Role**: The dedicated execution engine for {{ PROJECT_NAME }}.
-   * **Function**: Executes all {{ PROJECT_NAME }} container fleets (Human & AI Agent review loops), headless browser instances (Playwright / Puppeteer), agentic task loops, and backend microservices.
+   * **Function**: Executes all {{ PROJECT_NAME }} runtime workloads, container fleets, headless browser instances, test suites, and backend microservices.
 
 ```
 +------------------------------------+          SSH ProxyJump
@@ -39,12 +39,11 @@ To ensure strict separation of concerns, safety, reproducibility, and system sta
 |   | Dedicated Guest: {{ VM_NAME }} (IP: {{ VM_IP }})                            |   |
 |   | {{ VCPU_CORES }} vCPUs | {{ RAM_MIB }} MiB RAM | {{ DISK_SIZE_GIB }} GiB Disk | Static DHCP | Docker & Python Stack      |   |
 |   |                                                                                 |   |
-|   |   [ {{ PROJECT_NAME }} Agentic Workhorse Execution Environment ]                         |   |
+|   |   [ {{ PROJECT_NAME }} Isolated Execution Environment ]                         |   |
 |   |                                                                                 |   |
 |   |   +-------------------------------------------------------------------------+   |   |
-|   |   | Ephemeral Isolated Execution Containers                                 |   |   |
-|   |   |   [ Container 1 ]       [ Container 2 ]       [ Container 3 ]           |   |   |
-|   |   |   Human Visitor         Human Customer        AI Agent Visitor          |   |   |
+|   |   | Isolated Application & Container Workloads                              |   |   |
+|   |   |   [ App Server ]        [ Worker / Test ]       [ Database / Cache ]    |   |   |
 |   |   +-------------------------------------------------------------------------+   |   |
 |   +---------------------------------------------------------------------------------+   |
 +-----------------------------------------------------------------------------------------+
@@ -73,7 +72,7 @@ To ensure strict separation of concerns, safety, reproducibility, and system sta
 ## 3. Pre-Installed Software Stack on `{{ VM_NAME }}`
 
 The VM is bootstrapped via `cloud-init` with all essential tooling pre-configured:
-* **Container Runtime**: `docker.io`, `containerd`, and `docker-compose-v2` for orchestrating the multi-persona isolated audit containers.
+* **Container Runtime**: `docker.io`, `containerd`, and `docker-compose-v2` for orchestrating isolated application containers.
 * **Hypervisor Integration**: `qemu-guest-agent` for live status reporting, IP reporting, and host-guest management.
 * **Python Environment**: `python3`, `python3-venv`, and `python3-pip` for running agent loops, scoring engines, and API services.
 * **Developer Utilities**: `git`, `curl`, `wget`, `jq`, `tmux`, `htop`, `ca-certificates`, and `rsync`.
@@ -113,9 +112,9 @@ ssh {{ VM_NAME }} "docker ps && uptime"
 
 ---
 
-## 5. Development & Dogfooding Workflow
+## 5. Development & Isolated Execution Workflow
 
-A core tenet of {{ PROJECT_NAME }} is **self-hosting / dogfooding**: using {{ PROJECT_NAME }} itself to continuously test and audit the {{ PROJECT_NAME }} web application during development.
+A core tenet of {{ PROJECT_NAME }} under AirlockVM is **zero-workload isolation**: authoring code on the workstation while running all builds, tests, and services inside `{{ VM_NAME }}`.
 
 ### 5.1 Code Synchronization
 Code is written on `{{ DEV_HOST }}` and synchronized to `{{ VM_NAME }}` for building and testing:
