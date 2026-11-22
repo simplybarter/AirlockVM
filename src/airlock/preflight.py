@@ -72,6 +72,7 @@ def validate_deployment_preflight(vm_name: str) -> dict[str, Any]:
     yaml_path, doc = _find_vm_yaml(vm_name)
     if not yaml_path or not doc:
         return {
+            "success": False,
             "deployable": False,
             "confidence_score": 0.0,
             "verdict": "BLOCKED",
@@ -151,7 +152,11 @@ def validate_deployment_preflight(vm_name: str) -> dict[str, Any]:
         checks["proxy_port_free"] = {"status": "PASS", "message": f"External proxy port {ext_port} is free on {vmhost}"}
 
     # 6. Storage Pool Free Headroom
-    rc, out, err = _ssh_cmd(vmhost, "df -BG /var/lib/nhr/vm 2>/dev/null | tail -1 | awk '{print $4}' | tr -d 'G'")
+    storage_cmd = (
+        "for d in /var/lib/libvirt/images /var/lib/libvirt /; do "
+        "if [ -d \"$d\" ]; then df -BG \"$d\" 2>/dev/null | tail -1 | awk '{print $4}' | tr -d 'G'; break; fi; done"
+    )
+    rc, out, err = _ssh_cmd(vmhost, storage_cmd)
     free_gib = int(out) if rc == 0 and out.isdigit() else 0
     if free_gib >= requested_disk_gib:
         checks["storage_headroom"] = {
@@ -194,7 +199,12 @@ def validate_deployment_preflight(vm_name: str) -> dict[str, Any]:
         warnings += 1
 
     # 8. Base Cloud Image Cached
-    rc, out, err = _ssh_cmd(vmhost, "[ -f /var/lib/nhr/vm/ubuntu-24.04-minimal-cloudimg.img ] && echo 'CACHED' || echo 'MISSING'")
+    check_img_cmd = (
+        "for img in /var/lib/libvirt/images/ubuntu-24.04-minimal-cloudimg.img "
+        "/var/lib/libvirt/images/noble-server-cloudimg-amd64.img; do "
+        "[ -f \"$img\" ] && echo 'CACHED' && exit 0; done; echo 'MISSING'"
+    )
+    rc, out, err = _ssh_cmd(vmhost, check_img_cmd)
     if rc == 0 and "CACHED" in out:
         checks["base_image_cached"] = {"status": "PASS", "message": "Ubuntu 24.04 minimal cloud image is cached on hypervisor"}
     else:

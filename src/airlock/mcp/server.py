@@ -503,14 +503,14 @@ def airlock_create_vm(
                     "target": "vda",
                     "bus": "virtio",
                     "format": "qcow2",
-                    "source": f"/var/lib/nhr/vm/{vm_name}.snapshot-base-clean",
+                    "source": f"/var/lib/libvirt/images/{vm_name}.snapshot-base-clean",
                 },
                 {
                     "device": "disk",
                     "target": "vdb",
                     "bus": "virtio",
                     "format": "qcow2",
-                    "source": f"/var/lib/nhr/vm/{vm_name}-seed.snapshot-base-clean",
+                    "source": f"/var/lib/libvirt/images/{vm_name}-seed.snapshot-base-clean",
                 },
             ],
             "network": {

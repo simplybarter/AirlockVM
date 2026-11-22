@@ -181,7 +181,7 @@ class TestPermutationD_DedicatedVMLifecycle(unittest.TestCase):
         self.assertIn("3002", content)
 
     def test_preflight_audit_gates_ready(self):
-        pf = srv.airlock_preflight("nhr-workhorse-02")
+        pf = srv.airlock_preflight("ready-test-vm")
         self.assertTrue(pf.get("success"))
         self.assertEqual(pf.get("verdict"), "READY_TO_DEPLOY")
         self.assertEqual(pf.get("confidence_score"), 1.0)
@@ -318,7 +318,7 @@ class TestPermutationF_DriftAndDiagnostics(unittest.TestCase):
         self.assertIn("not found in inventory", diag.get("error", ""))
 
     def test_diagnose_powered_off_vm(self):
-        diag = srv.airlock_diagnose("nhr-workhorse-01")
+        diag = srv.airlock_diagnose("dummy-airlock-app-vm")
         self.assertTrue(diag.get("success"))
         self.assertEqual(diag.get("root_cause"), "VM_POWERED_OFF")
         self.assertTrue("airlock_power" in diag.get("suggested_action", "") or "start" in diag.get("suggested_action", ""))

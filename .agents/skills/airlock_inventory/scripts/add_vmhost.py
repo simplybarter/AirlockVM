@@ -368,24 +368,9 @@ def derive_vm_blueprint(vm_name: str, host: str, inventory_root: Path) -> dict:
         prim_user = "airlock"
         int_port = "3000"
         ext_port = "3001"
-    elif "appsurfer" in vm_name.lower():
-        proj_name = "AppSurfer"
-        prim_user = "appsurfer"
-        int_port = "8000"
-        ext_port = "8001"
-    elif "nhr" in vm_name.lower():
-        proj_name = f"NHR-{parts[-1].capitalize() if len(parts) > 1 else 'Worker'}"
-        prim_user = "nhr-worker"
-        int_port = "8080"
-        ext_port = "8081"
-    elif "rugby" in vm_name.lower():
-        proj_name = "RugbyAssistant"
-        prim_user = "rugby"
-        int_port = "5000"
-        ext_port = "5001"
     else:
         proj_name = project_display
-        prim_user = clean_name.lower().replace("-", "")
+        prim_user = clean_name.lower().replace("-", "") or "developer"
         int_port = "3000"
         ext_port = "3001"
 

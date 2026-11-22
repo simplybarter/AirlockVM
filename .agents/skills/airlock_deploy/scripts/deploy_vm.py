@@ -360,7 +360,6 @@ def resolve_storage_dir(host: str) -> str:
 def resolve_base_cloud_image(host: str, target_dir: str, dry_run: bool = False) -> str:
     """Finds existing Noble cloud image or downloads it to the hypervisor."""
     candidates = [
-        "/var/lib/nhr/vm/ubuntu-24.04-minimal-cloudimg.img",
         f"{target_dir}/ubuntu-24.04-minimal-cloudimg.img",
         "/var/lib/libvirt/images/ubuntu-24.04-minimal-cloudimg.img",
         "/var/lib/libvirt/images/noble-server-cloudimg-amd64.img",
