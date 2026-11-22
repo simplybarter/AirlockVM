@@ -9,8 +9,27 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AIRLOCK_ROOT="$SCRIPT_DIR"
-AIRLOCK_MCP_BIN="${AIRLOCK_ROOT}/.venv/bin/airlock-mcp"
-AIRLOCK_PYTHON="${AIRLOCK_ROOT}/.venv/bin/python"
+
+# Resolve airlock-mcp binary: prefer standard user tool (~/.local/bin), then PATH, then local .venv
+if [[ "${AIRLOCK_USE_VENV:-false}" == "true" && -x "${AIRLOCK_ROOT}/.venv/bin/airlock-mcp" ]]; then
+  AIRLOCK_MCP_BIN="${AIRLOCK_ROOT}/.venv/bin/airlock-mcp"
+elif [[ -x "${HOME}/.local/bin/airlock-mcp" ]]; then
+  AIRLOCK_MCP_BIN="${HOME}/.local/bin/airlock-mcp"
+elif command -v airlock-mcp >/dev/null 2>&1; then
+  AIRLOCK_MCP_BIN="$(command -v airlock-mcp)"
+elif [[ -x "${AIRLOCK_ROOT}/.venv/bin/airlock-mcp" ]]; then
+  AIRLOCK_MCP_BIN="${AIRLOCK_ROOT}/.venv/bin/airlock-mcp"
+else
+  AIRLOCK_MCP_BIN="${HOME}/.local/bin/airlock-mcp"
+fi
+
+if [[ -x "${AIRLOCK_ROOT}/.venv/bin/python" ]]; then
+  AIRLOCK_PYTHON="${AIRLOCK_ROOT}/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+  AIRLOCK_PYTHON="$(command -v python3)"
+else
+  AIRLOCK_PYTHON="python3"
+fi
 
 MODE="target"
 TARGET_DIR=""
@@ -132,10 +151,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate AirlockVM binary
-if [[ ! -f "$AIRLOCK_MCP_BIN" && ! -f "$AIRLOCK_PYTHON" ]]; then
-  echo "Error: AirlockVM virtual environment not found at ${AIRLOCK_ROOT}/.venv" >&2
-  echo "Please set up the virtual environment first:" >&2
-  echo "  python3.14 -m venv .venv && .venv/bin/pip install -e ." >&2
+if [[ ! -x "$AIRLOCK_MCP_BIN" && ! -f "$AIRLOCK_MCP_BIN" && ! -f "$AIRLOCK_PYTHON" ]]; then
+  echo "Error: AirlockVM MCP server binary not found at ${AIRLOCK_MCP_BIN} or ${AIRLOCK_ROOT}/.venv" >&2
+  echo "Please install it first:" >&2
+  echo "  ./install_mcp_server.sh" >&2
   exit 1
 fi
 
