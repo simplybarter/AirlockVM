@@ -458,6 +458,91 @@ class TestMitigationsUnit(unittest.TestCase):
                 resolved = resolve_sync_dispatcher(AIRLOCK_ROOT)
             self.assertEqual(resolved, user_disp)
 
+    def test_airlock_exec_engine_and_cli(self):
+        from airlock.executor import exec_in_vm
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inv = Path(tmpdir)
+            vm_dir = inv / "localhost" / "exec-vm"
+            vm_dir.mkdir(parents=True)
+            (vm_dir / "vm.yaml").write_text(
+                yaml.safe_dump({
+                    "vm": {
+                        "name": "exec-vm",
+                        "host": "localhost",
+                        "blueprint": {"remote_code_dir": "~/my-app/"},
+                    }
+                }),
+                encoding="utf-8",
+            )
+            old_env = os.environ.get("AIRLOCK_INVENTORY_DIR")
+            os.environ["AIRLOCK_INVENTORY_DIR"] = str(inv)
+            try:
+                with patch("airlock.executor.run_guest_cmd", return_value=(0, "42 passed", "")) as mock_guest:
+                    res = exec_in_vm("exec-vm", 'pytest -k "smoke" | head -n 5', timeout=30)
+                self.assertTrue(res["success"])
+                self.assertEqual(res["returncode"], 0)
+                self.assertEqual(res["stdout"], "42 passed")
+                self.assertEqual(res["workdir"], "~/my-app/")
+                # Verify base64 transport is used
+                called_script = mock_guest.call_args[0][1]
+                self.assertIn("base64 -d", called_script)
+
+                # Invalid VM name rejected
+                bad = exec_in_vm("bad;vm", "ls")
+                self.assertFalse(bad["success"])
+
+                # CLI airlock exec subcommand
+                buf = io.StringIO()
+                with patch("airlock.cli.airlock_exec", return_value={"success": True, "returncode": 0, "stdout": "ok", "stderr": ""}), \
+                     redirect_stdout(buf):
+                    rc = cli.main(["exec", "exec-vm", "--", "pytest", "-q"])
+                self.assertEqual(rc, 0)
+                self.assertIn("ok", buf.getvalue())
+            finally:
+                if old_env is not None:
+                    os.environ["AIRLOCK_INVENTORY_DIR"] = old_env
+                else:
+                    os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
+
+    def test_golden_image_fast_boot_and_baker(self):
+        deploy_mod = _load_module(
+            "deploy_vm_golden_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py",
+        )
+        # 1. Golden image detection prefers airlock-golden-ubuntu-24.04.qcow2
+        with patch.object(deploy_mod, "run_cmd_status", return_value=(0, "", "")):
+            img_path, is_golden = deploy_mod.resolve_base_image_info("localhost", "/var/lib/libvirt/images")
+        self.assertTrue(is_golden)
+        self.assertTrue(img_path.endswith(deploy_mod.GOLDEN_IMAGE_FILENAME))
+
+        # 2. Cloud-init skips packages block when is_golden=True
+        captured = {}
+
+        def fake_run(cmd, host=None):
+            captured["script"] = cmd[-1]
+            return 0, "", ""
+
+        params = {
+            "VM_NAME": "fast-vm",
+            "VM_PRIMARY_USER": "airlock",
+            "VM_SECONDARY_USER": "",
+        }
+        with patch.object(deploy_mod, "run_cmd_status", side_effect=fake_run):
+            deploy_mod.generate_cloud_init_seed(params, "ssh-ed25519 AAAA fast", "/tmp/seed.iso", "localhost", dry_run=False, is_golden=True)
+        self.assertNotIn("packages:", captured["script"])
+        self.assertIn("systemctl enable --now docker", captured["script"])
+
+        # 3. bake_golden_image dry-run succeeds cleanly
+        buf = io.StringIO()
+        with patch.object(deploy_mod, "run_cmd_status", return_value=(1, "", "")), \
+             patch.object(deploy_mod, "resolve_storage_dir", return_value="/var/lib/libvirt/images"), \
+             patch.object(deploy_mod, "resolve_base_cloud_image", return_value="/var/lib/libvirt/images/ubuntu-24.04-minimal-cloudimg.img"), \
+             redirect_stdout(buf):
+            rc = deploy_mod.bake_golden_image("localhost", dry_run=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("virt-customize", buf.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
