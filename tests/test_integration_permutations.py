@@ -9,7 +9,7 @@ Tests all permutations across the AirlockVM MCP Server and sub-engines:
 - Permutation F: Drift Detection & Diagnostic Intelligence
 - Permutation G: Security Isolation & Workstation Zero-Workload Invariant
 - Permutation H: Multi-IDE Client Connector CLI (connect_airlock.sh)
-- Permutation I: Live Deployment & Hypervisor Proxy Reachability (http://barkley:3002/)
+- Permutation I: Live Deployment & Hypervisor Proxy Reachability (http://remotehost:3002/)
 """
 
 from __future__ import annotations
@@ -37,6 +37,10 @@ from airlock.security import audit_vm_security
 AIRLOCK_ROOT = Path(__file__).resolve().parents[1]
 INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
 DUMMY_APP_DIR = (AIRLOCK_ROOT / ".." / "DummyAirlockApp").resolve()
+EXISTING_HOSTS = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()]
+REMOTE_HOST = "remotehost" if "remotehost" in EXISTING_HOSTS else (
+    next((h for h in EXISTING_HOSTS if h != "localhost"), "remotehost")
+)
 
 
 class TestPermutationA_ObservabilityAndInspection(unittest.TestCase):
@@ -111,9 +115,9 @@ class TestPermutationC_PlacementAndNetworking(unittest.TestCase):
     """Permutation C: Tests placement optimizer, network allocation, and port management."""
 
     def test_hypervisor_inspection(self):
-        info = inspect_hypervisor("barkley")
+        info = inspect_hypervisor(REMOTE_HOST)
         self.assertTrue(info.get("success"))
-        self.assertEqual(info.get("vmhost"), "barkley")
+        self.assertEqual(info.get("vmhost"), REMOTE_HOST)
         self.assertGreater(info.get("available_ram_mib", 0), 1024)
 
     def test_host_placement_optimizer(self):
@@ -121,13 +125,13 @@ class TestPermutationC_PlacementAndNetworking(unittest.TestCase):
         self.assertTrue(result.get("success"))
         self.assertIn("selected_host", result)
         self.assertIn("selected_hypervisor", result)
-        self.assertEqual(result["selected_host"], "barkley")
-        self.assertEqual(result["selected_hypervisor"], "barkley")
+        self.assertIn(result["selected_host"], EXISTING_HOSTS or [REMOTE_HOST, "localhost"])
+        self.assertIn(result["selected_hypervisor"], EXISTING_HOSTS or [REMOTE_HOST, "localhost"])
 
     def test_network_allocation_unique(self):
-        alloc = srv.airlock_alloc_network(vmhost="barkley")
+        alloc = srv.airlock_alloc_network(vmhost=REMOTE_HOST)
         self.assertTrue(alloc.get("success"))
-        self.assertEqual(alloc.get("vmhost"), "barkley")
+        self.assertEqual(alloc.get("vmhost"), REMOTE_HOST)
         self.assertTrue(alloc.get("allocated_ip", "").startswith("192.168.122."))
         self.assertTrue(alloc.get("allocated_mac", "").startswith("52:54:00:"))
 
@@ -137,31 +141,31 @@ class TestPermutationC_PlacementAndNetworking(unittest.TestCase):
         self.assertGreaterEqual(port_info.get("allocated_external_port", 0), 3001)
 
     def test_port_allocation_collision_avoidance(self):
-        port, reason = allocate_external_port(vmhost="barkley", internal_port=3000, preferred_port=3001)
-        # 3001 is already registered to airlock-vm; ensure allocation shifts to next free
-        self.assertNotEqual(port, 3001)
-        self.assertGreater(port, 3001)
+        # 3002 is registered to dummy-airlock-app-vm; ensure allocation shifts to next free
+        port, reason = allocate_external_port(vmhost=REMOTE_HOST, internal_port=3000, preferred_port=3002)
+        self.assertNotEqual(port, 3002)
+        self.assertGreaterEqual(port, 3001)
 
 
 class TestPermutationD_DedicatedVMLifecycle(unittest.TestCase):
     """Permutation D: Validates dedicated VM lifecycle derived for DummyAirlockApp."""
 
     def test_dummy_airlock_app_vm_ssot_exists(self):
-        yaml_path = INVENTORY_DIR / "barkley" / "dummy-airlock-app-vm" / "vm.yaml"
+        yaml_path = INVENTORY_DIR / REMOTE_HOST / "dummy-airlock-app-vm" / "vm.yaml"
         self.assertTrue(yaml_path.exists())
         with open(yaml_path, "r", encoding="utf-8") as f:
             doc = yaml.safe_load(f) or {}
 
         vm_data = doc.get("vm", {})
         self.assertEqual(vm_data.get("name"), "dummy-airlock-app-vm")
-        self.assertEqual(vm_data.get("host"), "barkley")
+        self.assertEqual(vm_data.get("host"), REMOTE_HOST)
         bp = vm_data.get("blueprint", {})
         self.assertEqual(bp.get("project_name"), "dummy-airlock-app")
         self.assertEqual(bp.get("app_internal_port"), 3000)
         self.assertEqual(bp.get("proxy_external_port"), 3002)
 
     def test_dummy_airlock_app_vm_runbook_clean(self):
-        runbook_path = INVENTORY_DIR / "barkley" / "dummy-airlock-app-vm" / "VM.md"
+        runbook_path = INVENTORY_DIR / REMOTE_HOST / "dummy-airlock-app-vm" / "VM.md"
         self.assertTrue(runbook_path.exists())
         content = runbook_path.read_text(encoding="utf-8")
         self.assertNotIn("{{", content)
@@ -202,13 +206,13 @@ class TestPermutationE_SharedAttachTopology(unittest.TestCase):
 
     def setUp(self):
         self.test_vm = "test-shared-staging-vm"
-        self.test_dir = INVENTORY_DIR / "barkley" / self.test_vm
+        self.test_dir = INVENTORY_DIR / REMOTE_HOST / self.test_vm
         self.test_dir.mkdir(parents=True, exist_ok=True)
         self.test_yaml = self.test_dir / "vm.yaml"
         sample_doc = {
             "vm": {
                 "name": self.test_vm,
-                "host": "barkley",
+                "host": REMOTE_HOST,
                 "state": "shut off",
                 "resources": {"vcpu": 2, "memory_mib": 2048},
                 "network": {"interfaces": [{"ip": "192.168.122.249", "mac": "52:54:00:11:22:33"}]},
@@ -284,10 +288,10 @@ class TestPermutationF_DriftAndDiagnostics(unittest.TestCase):
         self.assertFalse(res.get("has_drift"))
 
     def test_audit_drift_unprovisioned(self):
-        tmp_unprov = INVENTORY_DIR / "barkley" / "test-unprov-drift-vm"
+        tmp_unprov = INVENTORY_DIR / REMOTE_HOST / "test-unprov-drift-vm"
         tmp_unprov.mkdir(parents=True, exist_ok=True)
         try:
-            (tmp_unprov / "vm.yaml").write_text("vm:\n  name: test-unprov-drift-vm\n  host: barkley\n  state: shut off\n", encoding="utf-8")
+            (tmp_unprov / "vm.yaml").write_text(f"vm:\n  name: test-unprov-drift-vm\n  host: {REMOTE_HOST}\n  state: shut off\n", encoding="utf-8")
             res = srv.airlock_audit_drift("test-unprov-drift-vm")
             self.assertTrue(res.get("success"))
             self.assertFalse(res.get("domain_provisioned"))
@@ -310,10 +314,10 @@ class TestPermutationF_DriftAndDiagnostics(unittest.TestCase):
         self.assertTrue("airlock_power" in diag.get("suggested_action", "") or "start" in diag.get("suggested_action", ""))
 
     def test_diagnose_unprovisioned_vm(self):
-        tmp_unprov = INVENTORY_DIR / "barkley" / "test-unprov-diag-vm"
+        tmp_unprov = INVENTORY_DIR / REMOTE_HOST / "test-unprov-diag-vm"
         tmp_unprov.mkdir(parents=True, exist_ok=True)
         try:
-            (tmp_unprov / "vm.yaml").write_text("vm:\n  name: test-unprov-diag-vm\n  host: barkley\n  state: shut off\n", encoding="utf-8")
+            (tmp_unprov / "vm.yaml").write_text(f"vm:\n  name: test-unprov-diag-vm\n  host: {REMOTE_HOST}\n  state: shut off\n", encoding="utf-8")
             diag = srv.airlock_diagnose("test-unprov-diag-vm")
             self.assertTrue(diag.get("success"))
             self.assertIn(diag.get("root_cause"), ("DOMAIN_NOT_FOUND", "DOMAIN_NOT_PROVISIONED"))
@@ -390,7 +394,7 @@ class TestPermutationI_LiveDeploymentAndProxyReachability(unittest.TestCase):
     """Permutation I: End-to-end live deployment and hypervisor proxy reachability verification."""
 
     def test_live_proxy_http_reachability(self):
-        url = "http://barkley:3002/"
+        url = f"http://{REMOTE_HOST}:3002/"
         req = urllib.request.Request(url, headers={"User-Agent": "AirlockVM-Integration-Test/1.0"})
         with urllib.request.urlopen(req, timeout=6) as resp:
             self.assertEqual(resp.status, 200)

@@ -67,7 +67,7 @@ def audit_vm_drift(vm_name: str) -> dict[str, Any]:
         return {"success": False, "error": f"VM '{vm_name}' not found in inventory."}
 
     vm_data = doc.get("vm", {})
-    vmhost = vm_data.get("host", "barkley")
+    vmhost = vm_data.get("host", "remotehost")
     expected_state = vm_data.get("state", "shut off")
     res = vm_data.get("resources", {})
     expected_vcpu = int(res.get("vcpu", 4))
@@ -185,7 +185,7 @@ def reconcile_vm_drift(vm_name: str, strategy: str = "refresh_inventory") -> dic
     if not yaml_path or not doc:
         return {"success": False, "error": f"VM '{vm_name}' not found."}
 
-    vmhost = doc.get("vm", {}).get("host", "barkley")
+    vmhost = doc.get("vm", {}).get("host", "remotehost")
 
     if strategy == "refresh_inventory":
         cmd = ["python3", str(ADD_HOST_SCRIPT), vmhost, "--vm", vm_name]

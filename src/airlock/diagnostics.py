@@ -84,7 +84,7 @@ def diagnose_workload_failure(vm_name: str, app_name: str = "") -> dict[str, Any
         return {"success": False, "error": f"VM '{vm_name}' not found in inventory."}
 
     vm_data = doc.get("vm", {})
-    vmhost = vm_data.get("host", "barkley")
+    vmhost = vm_data.get("host", "remotehost")
     bp = vm_data.get("blueprint", {})
     int_port = bp.get("app_internal_port", 3000)
     ext_port = bp.get("proxy_external_port", 3001)

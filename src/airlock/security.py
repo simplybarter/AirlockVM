@@ -60,7 +60,7 @@ def audit_vm_security(vm_name: str, app_name: str = "") -> dict[str, Any]:
         return {"success": False, "error": f"VM '{vm_name}' not found in inventory."}
 
     vm_data = doc.get("vm", {})
-    vmhost = vm_data.get("host", "barkley")
+    vmhost = vm_data.get("host", "remotehost")
     bp = vm_data.get("blueprint", {})
     remote_dir = bp.get("remote_code_dir", "~/").replace("~", "$HOME")
 
@@ -107,7 +107,7 @@ def audit_vm_security(vm_name: str, app_name: str = "") -> dict[str, Any]:
     })
 
     # 3. Workstation Zero-Workload Invariant
-    # Audit local workstation processes to ensure node/python application workloads are not running on prodigy
+    # Audit local workstation processes to ensure node/python application workloads are not running on localhost
     local_workload_cmd = "pgrep -fa 'server\\.js' 2>/dev/null | grep -v -E 'antigravity|cursor|code|ide' || true"
     proc = subprocess.run(["bash", "-c", local_workload_cmd], stdout=subprocess.PIPE, text=True)
     local_procs = proc.stdout.strip()

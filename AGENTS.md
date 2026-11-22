@@ -6,7 +6,7 @@ Guidelines, operational standards, and architectural conventions for AI agents o
 
 ## 1. Strict Path Usage: Relative Paths Only
 
-* **Relative Paths Invariant**: All documentation files (`docs/*.md`, `README.md`, `USECASE.md`, etc.), scripts, agent skill configurations, test fixtures, and tool outputs must exclusively use **relative paths** (e.g., `docs/ARCHITECTURE.md`, `inventory/barkley/vmhost.yaml`, `tests/test_integration_permutations.py`).
+* **Relative Paths Invariant**: All documentation files (`docs/*.md`, `README.md`, `USECASE.md`, etc.), scripts, agent skill configurations, test fixtures, and tool outputs must exclusively use **relative paths** (e.g., `docs/ARCHITECTURE.md`, `inventory/remotehost/vmhost.yaml`, `tests/test_integration_permutations.py`).
 * **Portability Invariant**: **Never** hardcode absolute local paths (e.g., `/home/...`) or host-specific URI schemes (`file:///home/...`). The control plane and its test suites must remain fully portable across developers, machines, CI/CD runners, and execution environments.
 
 ---

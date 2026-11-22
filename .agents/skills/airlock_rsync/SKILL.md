@@ -100,7 +100,7 @@ repositories:
 
 You can also run any VM's deployment script directly:
 ```bash
-./inventory/barkley/appsurfer-vm/deploy_app_to_vm.sh --offline
+./inventory/remotehost/appsurfer-vm/deploy_app_to_vm.sh --offline
 ```
 
 ### Dry-Run Itemized Change Legend

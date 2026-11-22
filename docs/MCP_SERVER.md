@@ -30,7 +30,7 @@ flowchart TD
     end
 
     subgraph Hypervisors["Physical / Local Hypervisors"]
-        Hyp["Hypervisor (e.g. barkley)<br/>KVM / QEMU / libvirt"]
+        Hyp["Hypervisor (e.g. remotehost)<br/>KVM / QEMU / libvirt"]
         VM1["appsurfer-vm<br/>Isolated Workload :3000"]
         VM2["nohuman-vm<br/>Isolated Workload :3000"]
         Proxy["systemd-socket-proxyd<br/>Forwarders (:3001, :3002)"]

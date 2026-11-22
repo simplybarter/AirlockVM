@@ -186,7 +186,7 @@ Profile any virtualization host and archive its hardware, networking, and virtua
 
 ```bash
 # Discover and document remote hypervisor:
-python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py barkley
+python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py remotehost
 
 # Discover and document local KVM host:
 python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py localhost

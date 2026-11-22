@@ -88,7 +88,7 @@ def validate_deployment_preflight(vm_name: str) -> dict[str, Any]:
         }
 
     vm_data = doc.get("vm", {})
-    vmhost = vm_data.get("host", "barkley")
+    vmhost = vm_data.get("host", "remotehost")
     bp = vm_data.get("blueprint", {})
     res = vm_data.get("resources", {})
     net = vm_data.get("network", {})

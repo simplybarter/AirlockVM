@@ -939,7 +939,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="AirlockVM Inventory: Probes a hypervisor host and documents it in inventory/{vmhost}/vmhost.yaml and inventory/{vmhost}/{vm}/"
     )
-    parser.add_argument("host", nargs="?", default="barkley", help="Hypervisor hostname, IP, or SSH alias (default: barkley)")
+    parser.add_argument("host", nargs="?", default="remotehost", help="Hypervisor hostname, IP, or SSH alias (default: remotehost)")
     parser.add_argument("--user", "-u", default=None, help="SSH user (if remote)")
     parser.add_argument("--port", "-p", type=int, default=22, help="SSH port (default: 22)")
     parser.add_argument("--key", "-i", default=None, help="Path to SSH private key")

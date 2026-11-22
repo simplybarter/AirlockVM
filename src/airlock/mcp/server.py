@@ -214,7 +214,7 @@ def airlock_find_port(
 
     if not target_host:
         hosts = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()]
-        target_host = hosts[0] if hosts else "barkley"
+        target_host = hosts[0] if hosts else "remotehost"
 
     pref = preferred_port if preferred_port > 0 else None
 
@@ -239,12 +239,12 @@ def airlock_alloc_network(vmhost: str = "", network_name: str = "default") -> di
     """Allocates the next available collision-free static IP address and unique MAC address on virbr0.
 
     Args:
-        vmhost: Target hypervisor host name in inventory (e.g. 'barkley' or 'localhost'). Defaults to first registered host.
+        vmhost: Target hypervisor host name in inventory (e.g. 'remotehost' or 'localhost'). Defaults to first registered host.
         network_name: Libvirt network name (defaults to 'default').
     """
     if not vmhost:
         hosts = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()]
-        vmhost = hosts[0] if hosts else "barkley"
+        vmhost = hosts[0] if hosts else "remotehost"
 
     return allocate_vm_network(vmhost=vmhost, network_name=network_name)
 
@@ -426,7 +426,7 @@ def airlock_create_vm(
 
     Args:
         local_path: Absolute or relative local path to the application repository.
-        vmhost: Target hypervisor host ('barkley', 'localhost'). Auto-selected if omitted.
+        vmhost: Target hypervisor host ('remotehost', 'localhost'). Auto-selected if omitted.
         vm_name: Target VM domain name. Derived from app_name if omitted.
         app_name: Application display name. Inferred from manifests if omitted.
         internal_port: Application internal listening port. Inferred if 0.
@@ -467,7 +467,7 @@ def airlock_create_vm(
             vmhost = placement.get("selected_hypervisor") or placement.get("selected_host")
         else:
             hosts = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()]
-            vmhost = hosts[0] if hosts else "barkley"
+            vmhost = hosts[0] if hosts else "remotehost"
 
     # Allocate collision-free network IP & MAC
     net_alloc = allocate_vm_network(vmhost=vmhost)
@@ -635,7 +635,7 @@ def airlock_attach_app(
       conflict-free port automatically.
 
     Args:
-        vm_name: Domain name of the target VM in inventory (e.g. 'barkley-vm' or 'airlock-vm').
+        vm_name: Domain name of the target VM in inventory (e.g. 'remotehost-vm' or 'airlock-vm').
         local_path: Absolute or relative local path to the application repository.
         app_name: Optional custom name for the application (auto-detected if empty).
         internal_port: Internal port the application listens on (auto-detected if 0).

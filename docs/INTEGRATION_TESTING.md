@@ -78,10 +78,10 @@ AirlockVM supports two deployment models established via conversation between th
 * **Success Criteria**:
   - Automatically inspects `package.json` to detect Node.js, internal port 3000, and `npm start`.
   - Automatically allocates the next clean static IP (e.g. `192.168.122.238`) and collision-free MAC on `virbr0`.
-  - Automatically allocates a clean external forwarder port on hypervisor `barkley`.
-  - Generates `inventory/barkley/dummy-airlock-app-vm/vm.yaml` (SSOT).
-  - Generates parameterized operational runbook `inventory/barkley/dummy-airlock-app-vm/VM.md`.
-  - Generates `inventory/barkley/dummy-airlock-app-vm/deploy_app_to_vm.sh` and registers with root dispatcher.
+  - Automatically allocates a clean external forwarder port on hypervisor `remotehost`.
+  - Generates `inventory/remotehost/dummy-airlock-app-vm/vm.yaml` (SSOT).
+  - Generates parameterized operational runbook `inventory/remotehost/dummy-airlock-app-vm/VM.md`.
+  - Generates `inventory/remotehost/dummy-airlock-app-vm/deploy_app_to_vm.sh` and registers with root dispatcher.
 
 ---
 
@@ -128,9 +128,9 @@ AirlockVM supports two deployment models established via conversation between th
 
 ### Phase 6: Snapshot Baseline & Rollback (`airlock_snapshot`)
 * **Action**:
-  1. Create a clean baseline: `airlock_snapshot(vm_name="barkley-vm", action="create", snapshot_name="clean-base")`.
+  1. Create a clean baseline: `airlock_snapshot(vm_name="remotehost-vm", action="create", snapshot_name="clean-base")`.
   2. Perform test modifications.
-  3. Revert to baseline: `airlock_snapshot(vm_name="barkley-vm", action="revert", snapshot_name="clean-base")`.
+  3. Revert to baseline: `airlock_snapshot(vm_name="remotehost-vm", action="revert", snapshot_name="clean-base")`.
 * **Success Criteria**:
   - Disk state reverts cleanly without residual test artifacts or lingering background processes.
 
@@ -143,14 +143,14 @@ All 34 test permutations across 9 dimensions are executed in `.venv/bin/python -
 | Dimension | Permutation / Test Case | Tool / Engine | Result | Details |
 | :--- | :--- | :--- | :---: | :--- |
 | **A. Observability** | MCP Server Heartbeat | `airlock_ping` | **PASS** | Responsive Python 3.14.7 runtime |
-| | Inventory VM Discovery | `airlock_list` | **PASS** | Discovers 6 VMs across `barkley` |
+| | Inventory VM Discovery | `airlock_list` | **PASS** | Discovers 6 VMs across `remotehost` |
 | | Unprovisioned Status Reporting | `airlock_status` | **PASS** | Clear status notice without crashing |
 | **B. Stack Detection** | Node.js App Detection | `airlock_detect_app` | **PASS** | Identifies Node.js, port 3000, `npm start` |
 | | Python FastAPI/Uvicorn | `airlock_detect_app` | **PASS** | Identifies Python, port 8000, uvicorn |
 | | Docker & Dockerfile Expose | `airlock_detect_app` | **PASS** | Parses `EXPOSE` directives accurately |
 | | Nonexistent Directory | `airlock_detect_app` | **PASS** | Graceful error handling |
 | **C. Placement & Network** | Live Hypervisor Capacity Probe | `inspect_hypervisor` | **PASS** | Audits cores, RAM headroom, load average |
-| | Optimal Placement Optimizer | `airlock_select_host` | **PASS** | Selects `barkley` with placement scoring |
+| | Optimal Placement Optimizer | `airlock_select_host` | **PASS** | Selects `remotehost` with placement scoring |
 | | Collision-Free Network Alloc | `airlock_alloc_network`| **PASS** | Allocates unique IP & MAC on `virbr0` |
 | | Automatic External Port Alloc | `airlock_find_port` | **PASS** | Allocates available forwarder port |
 | | Port Collision Avoidance | `allocate_external_port`| **PASS** | Avoids occupied ports (shifts past 3001) |
@@ -173,7 +173,7 @@ All 34 test permutations across 9 dimensions are executed in `.venv/bin/python -
 | **H. Client Connector CLI** | Registration Inspection | `./connect_airlock.sh --list` | **PASS** | Audits global and project configurations |
 | | Multi-IDE Dry-Run Registration | `./connect_airlock.sh --all` | **PASS** | Evaluates Antigravity, VSCode, Cursor, etc. |
 | | Single-Platform Target Reg | `./connect_airlock.sh --cursor` | **PASS** | Targets selected client IDE |
-| **I. Live Deploy & Proxy** | Hypervisor Proxy Reachability | `curl http://barkley:3002/` | **PASS** | **HTTP 200 OK**, payload `{status: "ok", port: 3000}` |
+| **I. Live Deploy & Proxy** | Hypervisor Proxy Reachability | `curl http://remotehost:3002/` | **PASS** | **HTTP 200 OK**, payload `{status: "ok", port: 3000}` |
 | | Live MCP Route Health Check | `airlock_health_check` | **PASS** | Confirms `healthy: true` via proxy forwarder |
 | | Live Workload Profiler | `airlock_profile_workload`| **PASS** | Real-time CPU, RAM, and `node server.js` profiling |
 | | Live Domain Status Check | `airlock_status` | **PASS** | Confirms domain `running` on hypervisor |

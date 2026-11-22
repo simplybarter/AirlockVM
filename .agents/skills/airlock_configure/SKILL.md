@@ -38,7 +38,7 @@ When hypervisors are already documented in `inventory/` (via `airlock_inventory`
 
 ```bash
 # Pre-seed runbook from inventory records (offline mode):
-python3 .agents/skills/airlock_configure/scripts/configure_vm.py --from-inventory barkley
+python3 .agents/skills/airlock_configure/scripts/configure_vm.py --from-inventory remotehost
 ```
 
 * **Automated Pre-Flight Capability Checks**:

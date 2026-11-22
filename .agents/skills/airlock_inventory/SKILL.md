@@ -75,11 +75,11 @@ inventory/
 
 ### 1. Adding / Updating a VM Host in Inventory
 
-To discover and document a hypervisor host (e.g. `barkley` or `localhost`):
+To discover and document a hypervisor host (e.g. `remotehost` or `localhost`):
 
 ```bash
 # Add a remote hypervisor via SSH:
-python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py barkley
+python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py remotehost
 
 # Add local KVM hypervisor:
 python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py localhost
@@ -88,7 +88,7 @@ python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py localhost
 python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py 192.168.1.50 --user ubuntu --port 22 -i ~/.ssh/id_ed25519
 
 # Dry-run preview without writing files:
-python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py barkley --dry-run
+python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py remotehost --dry-run
 ```
 
 ### 2. Targeting a Specific Virtual Machine
@@ -96,7 +96,7 @@ python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py barkley --dry-run
 To document or refresh only a specific VM under a host:
 
 ```bash
-python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py barkley --vm airlock-vm
+python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py remotehost --vm airlock-vm
 ```
 
 ### 3. Querying & Inspecting Inventory
@@ -108,10 +108,10 @@ Use `inventory_manager.py` to inspect the documented environment:
 python3 .agents/skills/airlock_inventory/scripts/inventory_manager.py list
 
 # View the full YAML record for a host:
-python3 .agents/skills/airlock_inventory/scripts/inventory_manager.py show barkley
+python3 .agents/skills/airlock_inventory/scripts/inventory_manager.py show remotehost
 
 # View the full YAML record for a specific VM:
-python3 .agents/skills/airlock_inventory/scripts/inventory_manager.py show barkley airlock-vm
+python3 .agents/skills/airlock_inventory/scripts/inventory_manager.py show remotehost airlock-vm
 ```
 
 ### 4. Validating Inventory Records
