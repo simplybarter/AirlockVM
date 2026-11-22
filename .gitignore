@@ -1,6 +1,6 @@
-# Generated local sync scripts & inventory
+# Generated local sync scripts & root runtime inventory
 analysis/
-inventory/
+/inventory/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

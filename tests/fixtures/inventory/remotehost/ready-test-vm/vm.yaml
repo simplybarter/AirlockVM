@@ -1,0 +1,17 @@
+vm:
+  name: "ready-test-vm"
+  host: "remotehost"
+  state: "shut off"
+  resources:
+    vcpu: 2
+    memory_mib: 2048
+    disk_gib: 20
+  network:
+    interfaces:
+      - mac: "52:54:00:99:88:77"
+        ip: "192.168.122.240"
+  blueprint:
+    project_name: "ready-test"
+    app_internal_port: 3000
+    proxy_external_port: 3099
+    remote_code_dir: "~/ready-test/"

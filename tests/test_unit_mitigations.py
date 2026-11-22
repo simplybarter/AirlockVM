@@ -420,5 +420,44 @@ class TestMitigationsUnit(unittest.TestCase):
                     os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
 
 
+    def test_deploy_vm_ssh_config_exact_host_boundary(self):
+        deploy_mod = _load_module(
+            "deploy_vm_ssh_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_home = Path(tmpdir)
+            ssh_dir = fake_home / ".ssh"
+            ssh_dir.mkdir()
+            (ssh_dir / "app_vm_ed25519").write_text("PRIVATE", encoding="utf-8")
+            (ssh_dir / "app_vm_ed25519.pub").write_text("ssh-ed25519 AAAA app-vm", encoding="utf-8")
+            # Existing entry for app-vm-02 must NOT prevent adding app-vm
+            (ssh_dir / "config").write_text("Host app-vm-02\n    HostName 192.168.122.242\n", encoding="utf-8")
+
+            params = {
+                "VM_NAME": "app-vm",
+                "VM_IP": "192.168.122.241",
+                "VM_PRIMARY_USER": "airlock",
+                "HYPERVISOR_HOST": "localhost",
+                "SSH_KEY_PATH": str(ssh_dir / "app_vm_ed25519"),
+            }
+            with patch.object(deploy_mod.Path, "home", return_value=fake_home):
+                deploy_mod.ensure_workstation_ssh(params, dry_run=False)
+            updated = (ssh_dir / "config").read_text(encoding="utf-8")
+            self.assertIn("Host app-vm\n", updated)
+
+    def test_resolve_sync_dispatcher_prefers_user_bin(self):
+        from airlock.transport import resolve_sync_dispatcher
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_home = Path(tmpdir)
+            user_disp = fake_home / ".airlock" / "bin" / "deploy_app_to_airlock.sh"
+            user_disp.parent.mkdir(parents=True)
+            user_disp.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            with patch("airlock.transport.Path.home", return_value=fake_home):
+                resolved = resolve_sync_dispatcher(AIRLOCK_ROOT)
+            self.assertEqual(resolved, user_disp)
+
+
 if __name__ == "__main__":
     unittest.main()

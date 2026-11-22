@@ -14,6 +14,7 @@ Tests all permutations across the AirlockVM MCP Server and sub-engines:
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 from pathlib import Path
@@ -45,7 +46,24 @@ if "AIRLOCK_INVENTORY_DIR" not in os.environ and FIXTURE_INVENTORY_DIR.exists():
     os.environ["AIRLOCK_INVENTORY_DIR"] = str(FIXTURE_INVENTORY_DIR)
 
 INVENTORY_DIR = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
-DUMMY_APP_DIR = (AIRLOCK_ROOT / ".." / "DummyAirlockApp").resolve()
+_CANDIDATE_DUMMY_APP_DIR = (AIRLOCK_ROOT / ".." / "DummyAirlockApp").resolve()
+if _CANDIDATE_DUMMY_APP_DIR.exists():
+    DUMMY_APP_DIR = _CANDIDATE_DUMMY_APP_DIR
+else:
+    # Self-contained CI / fresh-clone fallback fixture when ../DummyAirlockApp is absent
+    _DUMMY_TMP = tempfile.TemporaryDirectory(prefix="airlock_dummy_app_")
+    atexit.register(_DUMMY_TMP.cleanup)
+    DUMMY_APP_DIR = Path(_DUMMY_TMP.name) / "DummyAirlockApp"
+    DUMMY_APP_DIR.mkdir(parents=True, exist_ok=True)
+    (DUMMY_APP_DIR / "package.json").write_text(
+        json.dumps({"name": "dummy-airlock-app", "version": "1.0.0", "scripts": {"start": "node server.js"}}),
+        encoding="utf-8",
+    )
+    (DUMMY_APP_DIR / "server.js").write_text(
+        "const http = require('http');\nhttp.createServer((req, res) => res.end('ok')).listen(3000);\n",
+        encoding="utf-8",
+    )
+    os.environ["AIRLOCK_DUMMY_APP_DIR"] = str(DUMMY_APP_DIR)
 EXISTING_HOSTS = [p.name for p in INVENTORY_DIR.glob("*") if (p / "vmhost.yaml").exists()] if INVENTORY_DIR.exists() else []
 REMOTE_HOST = "remotehost" if "remotehost" in EXISTING_HOSTS else (
     next((h for h in EXISTING_HOSTS if h != "localhost"), "remotehost")

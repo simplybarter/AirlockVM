@@ -1,0 +1,30 @@
+vm:
+  name: "dummy-airlock-app-vm"
+  host: "remotehost"
+  state: "shut off"
+  resources:
+    vcpu: 4
+    memory_mib: 4096
+    disk_gib: 50
+  network:
+    interfaces:
+      - mac: "52:54:00:12:34:56"
+        ip: "192.168.122.230"
+  blueprint:
+    project_name: "dummy-airlock-app"
+    primary_user: "airlock"
+    secondary_user: "developer"
+    ssh_key_path: "~/.ssh/id_rsa_airlock"
+    app_internal_port: 3000
+    proxy_external_port: 3002
+    proxy_socket_service: "/etc/systemd/system/dummy-airlock-app-proxy.socket"
+    remote_code_dir: "~/dummy-airlock-app/"
+    guest_os: "Ubuntu 24.04 LTS Minimal"
+    guest_os_details: "Pristine Noble Numbat cloud image"
+    cpu_mode: "host-passthrough"
+    balloon_driver: "virtio-balloon"
+    disk_size_gib: 50
+    disk_format: "qcow2"
+    uefi_firmware: "OVMF_CODE_4M.ms.fd"
+    snapshot_base_name: "snapshot-base-clean"
+    snapshot_base_desc: "Pristine base setup with Docker and Python"

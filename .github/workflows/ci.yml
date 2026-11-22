@@ -37,7 +37,7 @@ jobs:
 
       - name: Portability invariant check (no hardcoded local paths)
         run: |
-          if grep -rnE '(/home/|/Users/)' src/ docs/ tests/ .agents/ *.sh README.md QUICKSTART.md USECASE.md CONTRIBUTING.md; then
+          if grep -rnIE --exclude-dir=__pycache__ --exclude='*.pyc' '(/home/|/Users/)' src/ docs/ tests/ .agents/ *.sh README.md QUICKSTART.md USECASE.md CONTRIBUTING.md; then
             echo "ERROR: Hardcoded local user path detected!"
             exit 1
           fi

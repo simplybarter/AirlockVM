@@ -1,0 +1,48 @@
+vmhost:
+  name: "remotehost"
+  alias: "remotehost"
+  connection:
+    type: "ssh"
+    host: "remotehost"
+    port: 22
+    user: "developer"
+  system:
+    hostname: "remotehost"
+    os:
+      distribution: "ubuntu"
+      version: "24.04"
+      pretty_name: "Ubuntu 24.04 LTS"
+    network:
+      lan_ip: "192.168.1.100"
+  hardware:
+    cpu:
+      total_cores: 8
+      virtualization:
+        hardware_vt: true
+        flags: "vmx"
+        kvm_device_present: true
+    memory:
+      total_gb: 16
+      total_mib: 16384
+      available_mib: 12000
+    storage:
+      pools:
+        - name: default
+          path: /var/lib/libvirt/images
+          state: active
+  virtualization:
+    hypervisor:
+      type: "kvm"
+      daemon: "active"
+      libvirt_version: "libvirt 10.0.0"
+      qemu_version: "QEMU 8.2.2"
+    networks:
+      - name: default
+        bridge: virbr0
+        ip: 192.168.122.1
+        netmask: 255.255.255.0
+        dhcp_range: "192.168.122.2 - 192.168.122.254"
+  vms:
+    count: 1
+    domains:
+      - dummy-airlock-app-vm
