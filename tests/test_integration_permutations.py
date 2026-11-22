@@ -283,6 +283,10 @@ class TestPermutationE_SharedAttachTopology(unittest.TestCase):
         self.assertEqual(len(repos), 1)  # Not duplicated
         self.assertEqual(repos[0]["post_deploy"], "node custom_start.js")
 
+    def tearDown(self):
+        if hasattr(self, "test_dir") and self.test_dir.exists():
+            shutil.rmtree(self.test_dir, ignore_errors=True)
+
 
 class TestPermutationF_DriftAndDiagnostics(unittest.TestCase):
     """Permutation F: Tests drift detection and root-cause diagnostics."""
