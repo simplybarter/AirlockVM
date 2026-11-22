@@ -236,6 +236,8 @@ def validate_deployment_preflight(vm_name: str) -> dict[str, Any]:
         "deployable": deployable,
         "verdict": verdict,
         "confidence_score": confidence_score,
+        "passed_checks": passed_checks,
+        "total_checks": total_checks,
         "checks_passed": f"{passed_checks}/{total_checks}",
         "checks": checks,
         "remediations": remediations,
