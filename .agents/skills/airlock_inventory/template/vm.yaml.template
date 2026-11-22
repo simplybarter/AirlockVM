@@ -1,0 +1,48 @@
+# ==============================================================================
+# AirlockVM Virtual Machine Inventory Record
+# Host: {{ VMHOST_NAME }} | VM: {{ VM_NAME }}
+# Generated: {{ GENERATED_AT }}
+# ==============================================================================
+vm:
+  name: "{{ VM_NAME }}"
+  host: "{{ VMHOST_NAME }}"
+  state: "{{ VM_STATE }}"
+  id: "{{ VM_ID }}"
+  uuid: "{{ VM_UUID }}"
+  os_type: "{{ VM_OS_TYPE }}"
+  resources:
+    vcpu: {{ VM_VCPU }}
+    memory_mib: {{ VM_MEMORY_MIB }}
+    memory_gb: {{ VM_MEMORY_GB }}
+  disks:
+{{ VM_DISKS_YAML }}
+  network:
+    interfaces:
+{{ VM_INTERFACES_YAML }}
+  security:
+    apparmor_profile: "{{ VM_APPARMOR_PROFILE }}"
+    guest_agent_channel: {{ VM_GUEST_AGENT_PRESENT }}
+  blueprint:
+    project_name: "{{ BLUEPRINT_PROJECT_NAME }}"
+    primary_user: "{{ BLUEPRINT_PRIMARY_USER }}"
+    secondary_user: "{{ BLUEPRINT_SECONDARY_USER }}"
+    ssh_key_path: "{{ BLUEPRINT_SSH_KEY_PATH }}"
+    app_internal_port: {{ BLUEPRINT_APP_INTERNAL_PORT }}
+    proxy_external_port: {{ BLUEPRINT_PROXY_EXTERNAL_PORT }}
+    proxy_socket_service: "{{ BLUEPRINT_PROXY_SOCKET_SERVICE }}"
+    remote_code_dir: "{{ BLUEPRINT_REMOTE_CODE_DIR }}"
+    guest_os: "{{ BLUEPRINT_GUEST_OS }}"
+    guest_os_details: "{{ BLUEPRINT_GUEST_OS_DETAILS }}"
+    cpu_mode: "{{ BLUEPRINT_CPU_MODE }}"
+    balloon_driver: "{{ BLUEPRINT_BALLOON_DRIVER }}"
+    disk_size_gib: {{ BLUEPRINT_DISK_SIZE_GIB }}
+    disk_format: "{{ BLUEPRINT_DISK_FORMAT }}"
+    uefi_firmware: "{{ BLUEPRINT_UEFI_FIRMWARE }}"
+    snapshot_base_name: "{{ BLUEPRINT_SNAPSHOT_BASE_NAME }}"
+    snapshot_base_desc: "{{ BLUEPRINT_SNAPSHOT_BASE_DESC }}"
+    repositories:
+{{ BLUEPRINT_REPOSITORIES_YAML }}
+  metadata:
+    directory: "inventory/{{ VMHOST_NAME }}/{{ VM_NAME }}/"
+    record_path: "inventory/{{ VMHOST_NAME }}/{{ VM_NAME }}/vm.yaml"
+    last_discovered: "{{ GENERATED_AT }}"

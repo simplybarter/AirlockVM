@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest an idea or enhancement for DevBox
+about: Suggest an idea or enhancement for AirlockVM
 title: '[ENHANCEMENT] '
 labels: enhancement
 assignees: ''

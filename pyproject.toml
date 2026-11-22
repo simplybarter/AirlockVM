@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "devbox"
-version = "0.2.0"
-description = "Dedicated VM Development Environment and MCP Control Plane"
+name = "airlockvm"
+version = "0.3.0"
+description = "AirlockVM: Dedicated Execution Virtual Machine Control Plane, Runbook Sizing, and MCP Server"
 readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
@@ -15,7 +15,9 @@ dependencies = [
 ]
 
 [project.scripts]
-devbox-mcp = "devbox.mcp.server:main"
+airlock = "airlock.cli:main"
+airlock-mcp = "airlock.mcp.server:main"
+devbox-mcp = "airlock.mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/devbox"]
+packages = ["src/airlock"]

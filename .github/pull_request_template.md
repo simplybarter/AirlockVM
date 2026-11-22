@@ -8,6 +8,6 @@ Provide a brief summary of the changes introduced in this pull request.
 - [ ] Hypervisor probing / network detection enhancement
 
 ## Testing & Verification
-- [ ] Ran `python3 .agents/skills/devbox_configure/scripts/verify_config.py` with zero errors.
-- [ ] Tested dry-run rendering: `python3 .agents/skills/devbox_configure/scripts/configure_vm.py --dry-run`.
+- [ ] Ran `python3 .agents/skills/airlock_configure/scripts/verify_config.py` with zero errors.
+- [ ] Tested dry-run rendering: `python3 .agents/skills/airlock_configure/scripts/configure_vm.py --dry-run`.
 - [ ] Tested hypervisor capability pre-flight checks.

@@ -25,7 +25,7 @@ You author code on your workstation, but **zero application code runs directly o
                   | rsync / SSH
                   v
 +------------------------------------+
-| Dedicated Local VM (devbox-vm)     |
+| Dedicated Local VM (airlock-vm)     |
 | * Local KVM (/dev/kvm) on host     |
 | * Docker & Container Fleets        |
 | * Headless Browsers & Test Runners |
@@ -46,13 +46,13 @@ Deploy your application code into the local VM in milliseconds using the generat
 # Push application changes to the dedicated VM (skips caches, venvs, and docs)
 ./deploy_app_to_vm.sh
 ```
-*(Generated automatically by the `devbox_rsync` skill; alternatively, attach via VS Code Remote-SSH to edit directly inside the VM).*
+*(Generated automatically by the `airlock_rsync` skill; alternatively, attach via VS Code Remote-SSH to edit directly inside the VM).*
 
 ### 3. Execution & Testing Inside the VM
 Execute builds, migrations, and test suites over SSH:
 ```bash
 # Run tests inside the isolated guest
-ssh devbox-vm "docker compose up -d && pytest"
+ssh airlock-vm "docker compose up -d && pytest"
 ```
 
 ### 4. Viewing the Web App in Your Host Browser
@@ -65,33 +65,39 @@ http://192.168.122.236:3000
 ### 5. Instant Rollback & Clean Slate
 If experimental packages or broken container builds clutter the guest environment, reset the VM back to a clean baseline snapshot in seconds:
 ```bash
-sudo virsh snapshot-revert devbox-vm snapshot-base-clean
+sudo virsh snapshot-revert airlock-vm snapshot-base-clean
 ```
 Your workstation host OS remains untouched, clean, and fast.
 
 ---
 
-## How DevBox Automates This Setup
+## How AirlockVM Automates This Setup
 
-DevBox takes care of all setup friction automatically across a cohesive 4-skill lifecycle:
+AirlockVM takes care of all setup friction automatically across a cohesive 4-skill lifecycle:
 
-1. **Discovers Hypervisor & VMs**: Scans local or remote KVM hosts, documenting hardware, storage pools, networks, and existing VMs into structured YAML records (`devbox_inventory`).
-2. **Detects Capabilities & Sizes Headroom**: Ensures `/dev/kvm` and `virbr0` are available, calculating proportional vCPU and RAM allocations so your workstation never freezes (`devbox_configure`).
+1. **Discovers Hypervisor & VMs**: Scans local or remote KVM hosts, documenting hardware, storage pools, networks, and existing VMs into structured YAML records (`airlock_inventory`).
+2. **Detects Capabilities & Sizes Headroom**: Ensures `/dev/kvm` and `virbr0` are available, calculating proportional vCPU and RAM allocations so your workstation never freezes (`airlock_configure`).
 3. **Generates the Exact Runbook**: Creates your step-by-step operational specification (`inventory/{vmhost}/{vm}/VM.md`) with zero leftover placeholders.
-4. **Automated VM Provisioning & Inventory Sync**: Provisions domain, cloud-init seed, static DHCP, and socket proxying, auto-registering the VM in inventory (`devbox_deploy`).
-5. **Intelligent Code Synchronization**: Excludes heavy local caches and copies only application files (`devbox_rsync`).
+4. **Automated VM Provisioning & Inventory Sync**: Provisions domain, cloud-init seed, static DHCP, and socket proxying, auto-registering the VM in inventory (`airlock_deploy`).
+5. **Intelligent Code Synchronization**: Excludes heavy local caches and copies only application files (`airlock_rsync`).
 
 To set this up for your machine:
 ```bash
+# Using the unified airlock CLI:
+airlock probe localhost
+airlock deploy --yes
+airlock sync
+
+# Or using underlying skill scripts:
 # 1. Discover and document the hypervisor host:
-python3 .agents/skills/devbox_inventory/scripts/add_vmhost.py localhost
+python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py localhost
 
 # 2. Configure the runbook:
-python3 .agents/skills/devbox_configure/scripts/configure_vm.py --probe localhost
+python3 .agents/skills/airlock_configure/scripts/configure_vm.py --probe localhost
 
 # 3. Deploy the VM (auto-registers in inventory):
-python3 .agents/skills/devbox_deploy/scripts/deploy_vm.py --yes
+python3 .agents/skills/airlock_deploy/scripts/deploy_vm.py --yes
 
 # 4. Generate the sync script:
-python3 .agents/skills/devbox_rsync/scripts/generate_sync.py
+python3 .agents/skills/airlock_rsync/scripts/generate_sync.py
 ```

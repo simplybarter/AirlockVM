@@ -1,6 +1,6 @@
-# Contributing to DevBox
+# Contributing to AirlockVM
 
-Thank you for your interest in contributing to DevBox. We welcome improvements to the hypervisor probing logic, template customization engine, and documentation runbooks.
+Thank you for your interest in contributing to AirlockVM. We welcome improvements to the hypervisor probing logic, template customization engine, and documentation runbooks.
 
 ---
 
@@ -9,7 +9,7 @@ Thank you for your interest in contributing to DevBox. We welcome improvements t
 1. **Clone the repository**:
    ```bash
    git clone <repository-url>
-   cd DevBox
+   cd AirlockVM
    ```
 
 2. **Setup Python Virtual Environment**:
@@ -24,16 +24,16 @@ Thank you for your interest in contributing to DevBox. We welcome improvements t
 
 ## Running Verification Tests
 
-DevBox includes a validation tool to verify template placeholders, schema coverage, and rendered markdown documents.
+AirlockVM includes a validation tool to verify template placeholders, schema coverage, and rendered markdown documents.
 
 Always run the verification tool before opening a pull request:
 
 ```bash
-python3 .agents/skills/devbox_configure/scripts/verify_config.py
+python3 .agents/skills/airlock_configure/scripts/verify_config.py
 ```
 
 ### What `verify_config.py` Validates:
-* Confirms that all unique `{{ PLACEHOLDER }}` tokens in `template/VM.md.template` are accounted for in `devbox_inventory` templates.
+* Confirms that all unique `{{ PLACEHOLDER }}` tokens in `template/VM.md.template` are accounted for in `airlock_inventory` templates.
 * Audits rendered `VM.md` files in `inventory/` to ensure zero leftover or unrendered template tags remain.
 
 ---

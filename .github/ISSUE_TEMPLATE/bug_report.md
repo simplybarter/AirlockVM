@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Create a report to help us improve DevBox
+about: Create a report to help us improve AirlockVM
 title: '[BUG] '
 labels: bug
 assignees: ''

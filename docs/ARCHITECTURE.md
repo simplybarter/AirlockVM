@@ -1,12 +1,12 @@
-# DevBox Architecture & Security Model
+# AirlockVM Architecture & Security Model
 
-This document outlines the architectural principles, isolation boundaries, and security model enforced by DevBox.
+This document outlines the architectural principles, isolation boundaries, and security model enforced by AirlockVM.
 
 ---
 
 ## 1. Two-Tier Host Topology
 
-DevBox enforces a strict separation of concerns between code authoring and workload execution:
+AirlockVM enforces a strict separation of concerns between code authoring and workload execution:
 
 ### Tier 1: Development Workstation
 * **Responsibility**: Software development, source code authoring, version control (`git`), documentation, and IDE tooling.
@@ -32,7 +32,7 @@ To prevent guest execution environments from overwhelming hypervisor resources:
 
 ```text
 Local Workstation                  Hypervisor Host               Dedicated Guest VM
-(Browser / Client)                 (remote-host / localhost)         (devbox-vm)
+(Browser / Client)                 (remote-host / localhost)         (airlock-vm)
        |                                  |                             |
        |  HTTP :3001                      |                             |
        +--------------------------------->|  systemd-socket-proxyd      |
@@ -59,28 +59,28 @@ Local Workstation                  Hypervisor Host               Dedicated Guest
 
 ## 5. Agent Skills Lifecycle Architecture
 
-DevBox provides four complementary, composable skills for autonomous AI agents and command-line automation. The workflow operates as an automated lifecycle:
+AirlockVM provides four complementary, composable skills for autonomous AI agents and command-line automation. The workflow operates as an automated lifecycle:
 
 ```mermaid
 flowchart TD
-    Inv["1. devbox_inventory<br/>Discover & record hypervisors & VMs<br/>(inventory/{vmhost}/)"] --> Conf["2. devbox_configure<br/>Parameterize VM runbook from template<br/>(VM.md.template -> VM.md)"]
-    Conf --> Deploy["3. devbox_deploy<br/>Enforce pre-flight gates, provision domain,<br/>cloud-init seed & socket proxy"]
-    Deploy --> Rsync["4. devbox_rsync<br/>Evaluate project manifest & exclude rules,<br/>deploy app to VM (deploy_app_to_vm.sh)"]
+    Inv["1. airlock_inventory<br/>Discover & record hypervisors & VMs<br/>(inventory/{vmhost}/)"] --> Conf["2. airlock_configure<br/>Parameterize VM runbook from template<br/>(VM.md.template -> VM.md)"]
+    Conf --> Deploy["3. airlock_deploy<br/>Enforce pre-flight gates, provision domain,<br/>cloud-init seed & socket proxy"]
+    Deploy --> Rsync["4. airlock_rsync<br/>Evaluate project manifest & exclude rules,<br/>deploy app to VM (deploy_app_to_vm.sh)"]
 ```
 
-### Stage 1: Discovery & Documentation (`devbox_inventory`)
+### Stage 1: Discovery & Documentation (`airlock_inventory`)
 * **Role**: Inspects physical or local hypervisors via SSH or local libvirt, documenting hardware specifications, libvirt virtual networks, storage pools, and existing virtual machine domains.
 * **Artifacts**: Maintains structured YAML records (`inventory/{vmhost}/vmhost.yaml` and `inventory/{vmhost}/{vm}/vm.yaml`).
 
-### Stage 2: Configuration & Sizing (`devbox_configure`)
+### Stage 2: Configuration & Sizing (`airlock_configure`)
 * **Role**: Parameterizes the single source-of-truth template (`VM.md.template`) to produce an operational runbook (`VM.md`).
 * **Heuristics**: Calculates proportional vCPU and RAM allocations, ensures collision-free static IP and MAC assignments, and maps proxy forwarding ports.
 
-### Stage 3: Provisioning & Lifecycle Management (`devbox_deploy`)
+### Stage 3: Provisioning & Lifecycle Management (`airlock_deploy`)
 * **Role**: Enforces mandatory verification gates before hypervisor execution, generates cloud-init NoCloud ISO seeds, provisions KVM domains via `virt-install`, configures static DHCP reservations, and establishes persistent systemd socket proxying.
 * **Lifecycle**: Provides full lifecycle commands (`--start`, `--stop`, `--status`, `--snapshot`, `--rollback`, `--validate-proxy`).
 
-### Stage 4: Workload Deployment (`devbox_rsync`)
+### Stage 4: Workload Deployment (`airlock_rsync`)
 * **Role**: Evaluates project manifests (`package.json`, `requirements.txt`, etc.) and dynamically builds an optimized application deployment script (`deploy_app_to_vm.sh`).
 * **Boundary**: Strictly excludes local developer caches, IDE state, documentation, agent configs, and version control directories, ensuring only necessary runtime application code reaches the execution VM.
 
@@ -88,11 +88,11 @@ flowchart TD
 
 ## 6. Standalone Control Plane & MCP Server
 
-To decouple infrastructure logic from application repositories, DevBox operates as a standalone **Model Context Protocol (MCP)** server (`devbox-mcp`):
-* AI coding agents access DevBox tools (`devbox_create_vm`, `devbox_attach_app`, `devbox_preflight`, `devbox_deploy_vm`, `devbox_deploy_app`) without installing virtualization scripts in client projects.
+To decouple infrastructure logic from application repositories, AirlockVM operates as a standalone **Model Context Protocol (MCP)** server (`airlock-mcp`):
+* AI coding agents access AirlockVM tools (`airlock_create_vm`, `airlock_attach_app`, `airlock_preflight`, `airlock_deploy_vm`, `airlock_deploy_app`) without installing virtualization scripts in client projects.
 * **Dual Topology Model**:
-  - **Option A (Dedicated Execution VM)**: Isolated KVM domain with dedicated static IP, MAC, operational runbook (`VM.md`), and independent proxy sockets (`devbox_create_vm`).
-  - **Option B (Shared Staging Worker)**: Multiple decoupled application repositories mapped onto a shared worker VM with isolated remote code directories and independent proxy ports (`devbox_attach_app`).
+  - **Option A (Dedicated Execution VM)**: Isolated KVM domain with dedicated static IP, MAC, operational runbook (`VM.md`), and independent proxy sockets (`airlock_create_vm`).
+  - **Option B (Shared Staging Worker)**: Multiple decoupled application repositories mapped onto a shared worker VM with isolated remote code directories and independent proxy ports (`airlock_attach_app`).
 * **Autonomous Intelligence Engines**:
   - **Deployability Pre-Flight** (`preflight.py`): Non-destructive pre-flight verification confirming SSH, `/dev/kvm`, `libvirtd`, IP silence, port clearance, and RAM safety headroom with confidence scoring.
   - **Configuration Drift & Reconciliation** (`drift.py`): Audits live hypervisor domain and systemd proxy units against inventory SSOT, detecting discrepancies in vCPUs, RAM, and proxy units.

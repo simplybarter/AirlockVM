@@ -19,6 +19,7 @@ ENV/
 # Configuration overrides & local secrets
 *.local.json
 my_env.json
+my_airlock.json
 my_devbox.json
 *.env
 *.env.local

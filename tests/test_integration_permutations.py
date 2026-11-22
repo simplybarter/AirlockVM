@@ -8,7 +8,7 @@ Tests all permutations across the DevBox MCP Server and sub-engines:
 - Permutation E: Shared Attach Topology Lifecycle & Idempotency
 - Permutation F: Drift Detection & Diagnostic Intelligence
 - Permutation G: Security Isolation & Workstation Zero-Workload Invariant
-- Permutation H: Multi-IDE Client Connector CLI (connect_devbox.sh)
+- Permutation H: Multi-IDE Client Connector CLI (connect_airlock.sh)
 - Permutation I: Live Deployment & Hypervisor Proxy Reachability (http://barkley:3002/)
 """
 
@@ -23,20 +23,20 @@ import unittest
 import urllib.request
 import yaml
 
-import devbox.mcp.server as srv
-from devbox.detector import detect_application
-from devbox.diagnostics import diagnose_workload_failure
-from devbox.drift import audit_vm_drift
-from devbox.network import allocate_vm_network
-from devbox.placement import inspect_hypervisor, select_optimal_hypervisor
-from devbox.ports import allocate_external_port, get_inventory_used_ports
-from devbox.preflight import validate_deployment_preflight
-from devbox.security import audit_vm_security
+import airlock.mcp.server as srv
+from airlock.detector import detect_application
+from airlock.diagnostics import diagnose_workload_failure
+from airlock.drift import audit_vm_drift
+from airlock.network import allocate_vm_network
+from airlock.placement import inspect_hypervisor, select_optimal_hypervisor
+from airlock.ports import allocate_external_port, get_inventory_used_ports
+from airlock.preflight import validate_deployment_preflight
+from airlock.security import audit_vm_security
 
 
-DEVBOX_ROOT = Path(__file__).resolve().parents[1]
-INVENTORY_DIR = DEVBOX_ROOT / "inventory"
-DUMMY_APP_DIR = (DEVBOX_ROOT / ".." / "DummyDevBoxApp").resolve()
+AIRLOCK_ROOT = Path(__file__).resolve().parents[1]
+INVENTORY_DIR = AIRLOCK_ROOT / "inventory"
+DUMMY_APP_DIR = (AIRLOCK_ROOT / ".." / "DummyDevBoxApp").resolve()
 
 
 class TestPermutationA_ObservabilityAndInspection(unittest.TestCase):
@@ -44,7 +44,7 @@ class TestPermutationA_ObservabilityAndInspection(unittest.TestCase):
 
     def test_devbox_ping(self):
         result = srv.devbox_ping()
-        self.assertIn("DevBox MCP Server is online", result)
+        self.assertIn("AirlockVM MCP Server is online", result)
         self.assertIn("Python", result)
 
     def test_devbox_list(self):
@@ -228,7 +228,7 @@ class TestPermutationE_SharedAttachTopology(unittest.TestCase):
             shutil.rmtree(self.test_dir)
         # Regenerate sync script clean
         subprocess.run(
-            [str(DEVBOX_ROOT / ".venv/bin/python"), str(DEVBOX_ROOT / "inventory/generate_deploy_script.py")],
+            [str(AIRLOCK_ROOT / ".venv/bin/python"), str(AIRLOCK_ROOT / "inventory/generate_deploy_script.py")],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
@@ -347,8 +347,8 @@ class TestPermutationH_ClientConnectorCLI(unittest.TestCase):
 
     def test_connector_list(self):
         proc = subprocess.run(
-            ["./connect_devbox.sh", "--list"],
-            cwd=str(DEVBOX_ROOT),
+            ["./connect_airlock.sh", "--list"],
+            cwd=str(AIRLOCK_ROOT),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -359,8 +359,8 @@ class TestPermutationH_ClientConnectorCLI(unittest.TestCase):
 
     def test_connector_dry_run_all(self):
         proc = subprocess.run(
-            ["./connect_devbox.sh", "--target", str(DUMMY_APP_DIR), "--dry-run", "--all"],
-            cwd=str(DEVBOX_ROOT),
+            ["./connect_airlock.sh", "--target", str(DUMMY_APP_DIR), "--dry-run", "--all"],
+            cwd=str(AIRLOCK_ROOT),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -374,8 +374,8 @@ class TestPermutationH_ClientConnectorCLI(unittest.TestCase):
 
     def test_connector_dry_run_single_platform(self):
         proc = subprocess.run(
-            ["./connect_devbox.sh", "--target", str(DUMMY_APP_DIR), "--dry-run", "--cursor"],
-            cwd=str(DEVBOX_ROOT),
+            ["./connect_airlock.sh", "--target", str(DUMMY_APP_DIR), "--dry-run", "--cursor"],
+            cwd=str(AIRLOCK_ROOT),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
