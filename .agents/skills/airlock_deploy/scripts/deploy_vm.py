@@ -1049,16 +1049,25 @@ def _list_active_disks(vm_name: str, host: str) -> list[dict[str, str]]:
     return disks
 
 
-def _collect_backing_chain_paths(active_disks: list[dict[str, str]], host: str) -> set[str]:
-    """Collects every file referenced in the active qcow2 backing chains on the hypervisor."""
+def _collect_backing_chain_paths(active_disks: list[dict[str, str]], host: str) -> tuple[set[str], bool]:
+    """Collects every file referenced in the active qcow2 backing chains on the hypervisor.
+
+    Returns (referenced_paths, all_inspections_succeeded). Callers must NOT unlink overlay
+    files if inspection failed (fail-closed safety).
+    """
     referenced: set[str] = set()
+    all_ok = True
     for d in active_disks:
         src = d.get("source", "")
         if not src:
             continue
         referenced.add(src)
-        rc, out, _ = run_cmd_status(["sudo", "qemu-img", "info", "--backing-chain", src], host=host)
-        if rc == 0 and out:
+        rc, out, err = run_cmd_status(["sudo", "qemu-img", "info", "-U", "--backing-chain", src], host=host)
+        if rc != 0:
+            all_ok = False
+            print(f"    [-] Warning: Failed to inspect backing chain for '{src}': {err or out}", file=sys.stderr)
+            continue
+        if out:
             for line in out.splitlines():
                 if line.startswith("image:"):
                     img_p = line.split(":", 1)[1].strip()
@@ -1072,16 +1081,22 @@ def _collect_backing_chain_paths(active_disks: list[dict[str, str]], host: str) 
                         referenced.add(actual_m.group(1).strip())
                     else:
                         referenced.add(bf)
-    return referenced
+    return referenced, all_ok
 
 
 def _get_ordered_backing_chain(disk_path: str, host: str) -> list[str]:
-    """Returns the ordered qcow2 backing chain [active_leaf, parent, ..., root] for a disk."""
+    """Returns the ordered qcow2 backing chain [active_leaf, parent, ..., root] for a disk.
+
+    Raises RuntimeError if `qemu-img info -U --backing-chain` fails so callers never
+    silently treat an unreadable backing chain as flat.
+    """
     if not disk_path:
         return []
-    rc, out, _ = run_cmd_status(["sudo", "qemu-img", "info", "--backing-chain", disk_path], host=host)
+    rc, out, err = run_cmd_status(["sudo", "qemu-img", "info", "-U", "--backing-chain", disk_path], host=host)
+    if rc != 0:
+        raise RuntimeError(f"Failed to inspect backing chain for '{disk_path}': {err or out}")
     chain: list[str] = []
-    if rc == 0 and out:
+    if out:
         for line in out.splitlines():
             if line.startswith("image:"):
                 img_p = line.split(":", 1)[1].strip()
@@ -1249,7 +1264,7 @@ def execute_snapshot_delete(
         "ubuntu-24.04-minimal-cloudimg.img",
         "noble-server-cloudimg-amd64.img",
     }
-    referenced = _collect_backing_chain_paths(active_disks, host)
+    referenced, chain_ok = _collect_backing_chain_paths(active_disks, host)
     for rem_snap in remaining_snaps:
         rc_rxml, rxml, _ = run_cmd_status(["sudo", "virsh", "snapshot-dumpxml", vm_name, rem_snap], host=host)
         if rc_rxml == 0 and rxml:
@@ -1257,18 +1272,21 @@ def execute_snapshot_delete(
                 referenced.add(rpath)
 
     removed_overlays: list[str] = []
-    for _, cand_path in snap_overlays:
-        if not cand_path or cand_path in referenced:
-            continue
-        if os.path.basename(cand_path) in protected_basenames:
-            continue
-        rc_rm, out_rm, _ = run_cmd_status(
-            ["sudo", "bash", "-c", f"if [ -e {shlex.quote(cand_path)} ]; then rm -f -- {shlex.quote(cand_path)} && echo REMOVED; fi"],
-            host=host,
-        )
-        if rc_rm == 0 and "REMOVED" in out_rm:
-            removed_overlays.append(cand_path)
-            print(f"    [✓] Removed unreferenced overlay: {cand_path}")
+    if not chain_ok:
+        print("    [-] Skipping overlay unlink because backing-chain inspection failed (fail-closed).", file=sys.stderr)
+    else:
+        for _, cand_path in snap_overlays:
+            if not cand_path or cand_path in referenced:
+                continue
+            if os.path.basename(cand_path) in protected_basenames:
+                continue
+            rc_rm, out_rm, _ = run_cmd_status(
+                ["sudo", "bash", "-c", f"if [ -e {shlex.quote(cand_path)} ]; then rm -f -- {shlex.quote(cand_path)} && echo REMOVED; fi"],
+                host=host,
+            )
+            if rc_rm == 0 and "REMOVED" in out_rm:
+                removed_overlays.append(cand_path)
+                print(f"    [✓] Removed unreferenced overlay: {cand_path}")
 
     # Refresh vm.yaml disk source entries if active overlay paths changed
     vm_yaml_updated = _refresh_vm_yaml_disks(config_path, active_disks)
@@ -1329,7 +1347,11 @@ def execute_snapshot_flatten(
 
     for d in active_disks:
         src = d["source"]
-        chain = _get_ordered_backing_chain(src, host)
+        try:
+            chain = _get_ordered_backing_chain(src, host)
+        except RuntimeError as exc:
+            print(f"[-] Error: {exc}. Aborting flatten to avoid corrupting active overlays.", file=sys.stderr)
+            return 1
         vm_base = _find_vm_base_disk(chain, protected_basenames)
         if vm_base and src != vm_base:
             base_idx = chain.index(vm_base)
@@ -1441,18 +1463,21 @@ def execute_snapshot_flatten(
 
     # Step 5: Verify active backing chain & unlink only verified-unreferenced overlay files
     post_commit_disks = _list_active_disks(vm_name, host)
-    referenced = _collect_backing_chain_paths(post_commit_disks, host)
+    referenced, chain_ok = _collect_backing_chain_paths(post_commit_disks, host)
     unlinked_files: list[str] = []
-    for cand_path in candidate_overlays:
-        if not cand_path or cand_path in referenced or os.path.basename(cand_path) in protected_basenames:
-            continue
-        rc_rm, out_rm, _ = run_cmd_status(
-            ["sudo", "bash", "-c", f"if [ -e {shlex.quote(cand_path)} ]; then rm -f -- {shlex.quote(cand_path)} && echo REMOVED; fi"],
-            host=host,
-        )
-        if rc_rm == 0 and "REMOVED" in out_rm:
-            unlinked_files.append(cand_path)
-            print(f"    [✓] Unlinked unreferenced overlay: {cand_path}")
+    if not chain_ok:
+        print("    [-] Skipping overlay unlink because post-commit backing-chain inspection failed (fail-closed).", file=sys.stderr)
+    else:
+        for cand_path in candidate_overlays:
+            if not cand_path or cand_path in referenced or os.path.basename(cand_path) in protected_basenames:
+                continue
+            rc_rm, out_rm, _ = run_cmd_status(
+                ["sudo", "bash", "-c", f"if [ -e {shlex.quote(cand_path)} ]; then rm -f -- {shlex.quote(cand_path)} && echo REMOVED; fi"],
+                host=host,
+            )
+            if rc_rm == 0 and "REMOVED" in out_rm:
+                unlinked_files.append(cand_path)
+                print(f"    [✓] Unlinked unreferenced overlay: {cand_path}")
 
     # Step 6: Optionally create one fresh baseline snapshot on top of the flattened base disk
     created_snap = ""

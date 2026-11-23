@@ -1621,10 +1621,30 @@ class TestMitigationsUnit(unittest.TestCase):
             self.assertIn("--base", bc_cmds[0])
             self.assertIn("/var/lib/libvirt/images/flat-vm.qcow2", bc_cmds[0])
 
+            # Verify every qemu-img info call passes -U (--force-share) for running QEMU domains
+            qimg_cmds = [c for c in recorded if c[:3] == ["sudo", "qemu-img", "info"]]
+            self.assertTrue(len(qimg_cmds) >= 2)
+            for qc in qimg_cmds:
+                self.assertIn("-U", qc)
+
             # Verify vm.yaml updated both disk source and snapshot_base_name
             reloaded = yaml.safe_load(vm_yaml.read_text(encoding="utf-8"))
             self.assertEqual(reloaded["vm"]["disks"][0]["source"], "/var/lib/libvirt/images/flat-vm.snapshot-python314-uv")
             self.assertEqual(reloaded["vm"]["blueprint"]["snapshot_base_name"], "snapshot-python314-uv")
+
+        # 2d. Fail-closed: if qemu-img info -U fails (e.g. lock error), flatten aborts instead of deleting metadata
+        def fake_qimg_fail(cmd, host=None):
+            if cmd[:3] == ["sudo", "virsh", "snapshot-list"]:
+                return 0, "snapshot-base-clean\n", ""
+            if cmd[:3] == ["sudo", "virsh", "domblklist"]:
+                return 0, " Type Device Target Source\n-----\n file disk vda /var/lib/libvirt/images/flat-vm.snapshot-base-clean\n", ""
+            if cmd[:3] == ["sudo", "qemu-img", "info"]:
+                return 1, "", 'Failed to get shared "write" lock'
+            return 0, "", ""
+
+        with patch.object(deploy_mod, "run_cmd_status", side_effect=fake_qimg_fail):
+            rc_fail = deploy_mod.execute_snapshot_flatten(params, "localhost", force=True)
+        self.assertEqual(rc_fail, 1)
 
         # 3. MCP airlock_snapshot(action="flatten") & CLI `airlock snapshot flat-vm flatten`
         mock_out = 'AIRLOCK_SNAPSHOT_FLATTEN_JSON:{"changed": true, "removed_snapshots": ["snap-1"], "unlinked_files": ["/var/lib/libvirt/images/flat-vm.snap-1"], "active_disks": [], "new_snapshot": "snapshot-base-clean", "remaining_snapshots": ["snapshot-base-clean"], "vm_yaml_updated": true, "dry_run": false}'
