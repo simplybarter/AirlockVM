@@ -105,8 +105,18 @@ def load_vm_config(config_path: Path) -> dict[str, str]:
 
     hypervisor_host = vm_data.get("host") or host_data.get("name") or host_data.get("alias") or "localhost"
 
+    vm_name = str(vm_data.get("name", "airlock-vm"))
+    ext_port = str(bp.get("proxy_external_port", 3001))
+    default_proxy_service = f"/etc/systemd/system/{vm_name}-p{ext_port}-proxy.socket"
+    disks = vm_data.get("disks", [])
+    disk_sources = [
+        str(d.get("source", "")).strip()
+        for d in disks
+        if isinstance(d, dict) and d.get("source") and str(d.get("source", "")).strip() not in ("", "none")
+    ]
+
     params = {
-        "VM_NAME": str(vm_data.get("name", "airlock-vm")),
+        "VM_NAME": vm_name,
         "HYPERVISOR_HOST": str(hypervisor_host),
         "HYPERVISOR_LAN_IP": str(host_data.get("system", {}).get("network", {}).get("lan_ip", "")),
         "GUEST_OS": str(bp.get("guest_os", "Ubuntu 24.04 LTS Minimal")),
@@ -123,13 +133,14 @@ def load_vm_config(config_path: Path) -> dict[str, str]:
         "VM_PRIMARY_USER": str(bp.get("primary_user", "airlock")),
         "VM_SECONDARY_USER": str(bp.get("secondary_user", "")),
         "SSH_KEY_PATH": str(bp.get("ssh_key_path", "~/.ssh/airlock_vm_ed25519")),
-        "PROXY_SOCKET_SERVICE": str(bp.get("proxy_socket_service", "/etc/systemd/system/airlock-proxy.socket")),
-        "PROXY_EXTERNAL_PORT": str(bp.get("proxy_external_port", 3001)),
+        "PROXY_SOCKET_SERVICE": str(bp.get("proxy_socket_service", default_proxy_service)),
+        "PROXY_EXTERNAL_PORT": ext_port,
         "APP_INTERNAL_PORT": str(bp.get("app_internal_port", 3000)),
         "SNAPSHOT_BASE_NAME": str(bp.get("snapshot_base_name", "snapshot-base-clean")),
         "SNAPSHOT_BASE_DESC": str(bp.get("snapshot_base_desc", "Pristine base setup with Docker and Python")),
         "REMOTE_CODE_DIR": str(bp.get("remote_code_dir", "~/AirlockVM/")),
         "REPOSITORIES": bp.get("repositories", []),
+        "DISK_SOURCES": disk_sources,
     }
     return params
 
@@ -834,7 +845,7 @@ def validate_proxy_connection(params: dict, dry_run: bool = False) -> tuple[bool
     else:
         print(f"    [-] Proxy Validation WARNING: Could not connect to {proxy_url}.")
         print("        Possible causes:")
-        print(f"          1. systemd-socket-proxyd is inactive on {host} (check: ssh {host} 'systemctl status airlock-proxy.socket')")
+        print(f"          1. systemd-socket-proxyd is inactive on {host} (check: ssh {host} 'systemctl status {vm_name}-p{ext_port}-proxy.socket')")
         print(f"          2. External port {ext_port} is blocked by a firewall on {host}")
         print(f"          3. Virtual network bridge cannot route to {params['VM_IP']}:{int_port}")
         return False, "Proxy validation failed."
@@ -936,6 +947,18 @@ def sync_inventory_record(params: dict, action: str = "update", dry_run: bool = 
             else:
                 print(f"    [PLAN] Refresh inventory: python3 {inventory_script} {host}")
 
+        sync_script = REPO_ROOT / ".agents" / "skills" / "airlock_rsync" / "scripts" / "generate_sync.py"
+        if sync_script.exists():
+            print("    -> Regenerating sync dispatcher (~/.airlock/bin/deploy_app_to_airlock.sh)...")
+            if not dry_run:
+                res = subprocess.run([sys.executable, str(sync_script)], capture_output=True, text=True)
+                if res.returncode == 0:
+                    print("    [✓] Sync dispatcher regenerated.")
+                else:
+                    print(f"    [-] Warning regenerating sync dispatcher: {res.stderr.strip() or res.stdout.strip()}")
+            else:
+                print(f"    [PLAN] Regenerate sync dispatcher: python3 {sync_script}")
+
     elif action == "update":
         if inventory_script.exists():
             print(f"\n[*] Updating AirlockVM inventory (inventory/{host}/{vm_name}/vm.yaml)...")
@@ -1019,15 +1042,195 @@ def execute_power_action(params: dict, action: str) -> None:
         print(f"[✓] Successfully executed '{action}': {out or 'OK'}")
 
 
-def execute_purge(params: dict, host: str, dry_run: bool = False) -> None:
-    """Entirely removes the VM domain, nvram, snapshots, and disk storage from the hypervisor."""
+def remove_static_dhcp(params: dict, host: str, dry_run: bool = False) -> None:
+    """Removes the VM's static DHCP reservation from the libvirt network."""
+    net_name = params.get("LIBVIRT_NETWORK", "default")
+    mac = (params.get("VM_MAC") or "").strip()
+    ip = (params.get("VM_IP") or "").strip()
+    vm_name = params["VM_NAME"]
+
+    print(f"    -> Removing static DHCP reservation in libvirt network '{net_name}' on {host}...")
+    ret, out, _ = run_cmd_status(["sudo", "virsh", "net-dumpxml", net_name], host=host)
+    matched_snippets: list[str] = []
+    if ret == 0 and out:
+        for m in re.finditer(r"<host\b[^>]*/>", out):
+            tag = m.group(0)
+            mac_m = re.search(r"mac=['\"]([^'\"]+)['\"]", tag, re.IGNORECASE)
+            name_m = re.search(r"name=['\"]([^'\"]+)['\"]", tag)
+            ip_m = re.search(r"ip=['\"]([^'\"]+)['\"]", tag)
+            tag_mac = mac_m.group(1).lower() if mac_m else ""
+            tag_name = name_m.group(1) if name_m else ""
+            tag_ip = ip_m.group(1) if ip_m else ""
+            if (mac and tag_mac == mac.lower()) or (tag_name == vm_name) or (ip and tag_ip == ip):
+                matched_snippets.append(tag)
+
+    if not matched_snippets:
+        if dry_run and mac and ip:
+            fallback_xml = f"<host mac='{mac}' name='{vm_name}' ip='{ip}'/>"
+            print(f"    [PLAN] sudo virsh net-update {net_name} delete ip-dhcp-host \"{fallback_xml}\" --live --config")
+        else:
+            print(f"    [✓] No static DHCP reservation found for '{vm_name}' in '{net_name}'.")
+        return
+
+    for xml_snippet in matched_snippets:
+        cmd_live_cfg = ["sudo", "virsh", "net-update", net_name, "delete", "ip-dhcp-host", xml_snippet, "--live", "--config"]
+        if dry_run:
+            print(f"    [PLAN] {' '.join(cmd_live_cfg)}")
+            continue
+        rc, _, err = run_cmd_status(cmd_live_cfg, host=host)
+        if rc != 0:
+            # Fallback to --config only if network is inactive
+            rc2, _, err2 = run_cmd_status(
+                ["sudo", "virsh", "net-update", net_name, "delete", "ip-dhcp-host", xml_snippet, "--config"],
+                host=host,
+            )
+            if rc2 != 0:
+                print(f"    [-] Warning removing DHCP reservation ({xml_snippet}): {err2 or err}")
+                continue
+        print(f"    [✓] Removed static DHCP reservation: {xml_snippet}")
+
+
+def _remove_ssh_config_host_block(config_text: str, vm_name: str) -> tuple[str, bool]:
+    """Removes the exact 'Host <vm_name>' block (and preceding AirlockVM comment) from SSH config text."""
+    lines = config_text.splitlines(keepends=True)
+    result: list[str] = []
+    removed = False
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = re.match(r"^\s*Host\s+(.+)$", line)
+        if m:
+            hosts = m.group(1).strip().split()
+            if hosts == [vm_name]:
+                removed = True
+                # Also drop an immediately preceding AirlockVM comment line (and one blank line before it)
+                if result and result[-1].strip() == "# AirlockVM Execution Virtual Machine":
+                    result.pop()
+                if result and result[-1].strip() == "":
+                    result.pop()
+                # Skip all indented/blank lines belonging to this Host block until the next Host/Match directive
+                i += 1
+                while i < len(lines):
+                    nxt = lines[i]
+                    if re.match(r"^\s*(?:Host|Match)\s+", nxt):
+                        break
+                    if nxt.strip().startswith("#") and not nxt.startswith((" ", "\t")):
+                        break
+                    i += 1
+                continue
+        result.append(line)
+        i += 1
+
+    cleaned = "".join(result)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned, removed
+
+
+def _ssh_key_used_by_other_vms(key_path: Path, exclude_vm: str) -> bool:
+    """Returns True if any other VM in inventory references the same SSH private key path."""
+    inv_dir = Path(os.environ.get("AIRLOCK_INVENTORY_DIR", Path.home() / ".airlock" / "inventory"))
+    if not inv_dir.exists() or yaml is None:
+        return False
+    target_resolved = key_path.expanduser().resolve()
+    for yf in inv_dir.glob("*/*/vm.yaml"):
+        if yf.parent.name == exclude_vm:
+            continue
+        try:
+            doc = yaml.safe_load(yf.read_text(encoding="utf-8")) or {}
+            other_key = doc.get("vm", {}).get("blueprint", {}).get("ssh_key_path", "")
+            if other_key and Path(os.path.expanduser(str(other_key))).resolve() == target_resolved:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def cleanup_workstation_ssh(params: dict, purge_ssh_keys: bool = False, dry_run: bool = False) -> None:
+    """Cleans up workstation known_hosts, ~/.ssh/config host block, and optionally the VM SSH keypair."""
+    vm_name = params["VM_NAME"]
+    vm_ip = params.get("VM_IP", "")
+    ssh_dir = Path.home() / ".ssh"
+
+    # 1. Clean up ~/.ssh/known_hosts
+    print(f"    -> Cleaning up workstation ~/.ssh/known_hosts for '{vm_name}' and '{vm_ip}'...")
+    if not dry_run:
+        subprocess.run(["ssh-keygen", "-R", vm_name], capture_output=True)
+        if vm_ip:
+            subprocess.run(["ssh-keygen", "-R", vm_ip], capture_output=True)
+        print("    [✓] Workstation known_hosts cleaned.")
+    else:
+        print(f"    [PLAN] ssh-keygen -R {vm_name} && ssh-keygen -R {vm_ip}")
+
+    # 2. Remove Host <vm_name> block from ~/.ssh/config
+    ssh_config_file = ssh_dir / "config"
+    if ssh_config_file.exists():
+        existing_text = ssh_config_file.read_text(encoding="utf-8")
+        new_text, removed = _remove_ssh_config_host_block(existing_text, vm_name)
+        if removed:
+            print(f"    -> Removing 'Host {vm_name}' block from ~/.ssh/config...")
+            if dry_run:
+                print(f"    [PLAN] Remove 'Host {vm_name}' block from {ssh_config_file}")
+            else:
+                ssh_config_file.write_text(new_text, encoding="utf-8")
+                ssh_config_file.chmod(0o600)
+                print(f"    [✓] Removed 'Host {vm_name}' block from ~/.ssh/config.")
+
+    # 3. Optionally remove dedicated VM SSH keypair
+    raw_key = params.get("SSH_KEY_PATH", "")
+    if not raw_key:
+        return
+    key_path = Path(os.path.expanduser(raw_key))
+    pub_path = Path(f"{key_path}.pub") if not str(key_path).endswith(".pub") else key_path
+    protected_names = {"id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"}
+
+    if not purge_ssh_keys:
+        if key_path.exists() or pub_path.exists():
+            print(f"    [*] Retaining workstation SSH keypair '{raw_key}' (re-run with --purge-ssh-keys to delete).")
+        return
+
+    if key_path.name in protected_names:
+        print(f"    [-] Skipping deletion of standard workstation key '{key_path}'.")
+        return
+
+    if _ssh_key_used_by_other_vms(key_path, exclude_vm=vm_name):
+        print(f"    [-] Retaining SSH keypair '{raw_key}' because another VM in inventory references it.")
+        return
+
+    for kp in (key_path, pub_path):
+        if kp.exists():
+            if dry_run:
+                print(f"    [PLAN] Delete SSH key file: {kp}")
+            else:
+                kp.unlink(missing_ok=True)
+                print(f"    [✓] Deleted SSH key file: {kp}")
+
+
+def execute_purge(params: dict, host: str, dry_run: bool = False, purge_ssh_keys: bool = False) -> None:
+    """Entirely removes the VM domain, nvram, snapshots, DHCP lease, proxies, SSH config, and disk storage."""
     vm_name = params["VM_NAME"]
     target_storage = resolve_storage_dir(host)
 
     print(f"[*] Entirely removing AirlockVM VM '{vm_name}' and its storage from '{host}'...")
 
+    # Collect live block device paths before undefining so custom disk/snapshot paths are also purged
+    protected_basenames = {
+        GOLDEN_IMAGE_FILENAME,
+        "ubuntu-24.04-minimal-cloudimg.img",
+        "noble-server-cloudimg-amd64.img",
+    }
+    discovered_disks: list[str] = []
     exists, state = check_domain_status(vm_name, host)
     if exists:
+        if not dry_run:
+            rc_blk, blk_out, _ = run_cmd_status(["sudo", "virsh", "domblklist", vm_name, "--details"], host=host)
+            if rc_blk == 0 and blk_out:
+                for line in blk_out.splitlines()[2:]:
+                    parts = line.split()
+                    if len(parts) >= 4 and parts[3].startswith("/"):
+                        p = parts[3]
+                        if os.path.basename(p) not in protected_basenames:
+                            discovered_disks.append(p)
+
         if state.lower() == "running":
             print(f"    -> Destroying running domain '{vm_name}'...")
             if not dry_run:
@@ -1046,37 +1249,79 @@ def execute_purge(params: dict, host: str, dry_run: bool = False) -> None:
     else:
         print(f"    -> Domain '{vm_name}' is not registered in libvirt.")
 
-    # Remove disk storage and seed ISOs
-    print(f"    -> Deleting VM storage images in {target_storage}/{vm_name}*...")
-    if not dry_run:
-        cleanup_cmd = f"sudo rm -f '{target_storage}/{vm_name}'*.qcow2 '{target_storage}/{vm_name}'*.iso '{target_storage}/{vm_name}'.snapshot* '{target_storage}/{vm_name}'-seed.snapshot*"
-        ret, _, err = run_cmd_status(["bash", "-c", cleanup_cmd], host=host)
-        if ret == 0:
-            print(f"    [✓] Storage disks purged.")
-        else:
-            print(f"    [-] Warning during storage cleanup: {err}")
-    else:
-        print(f"    [PLAN] sudo rm -f '{target_storage}/{vm_name}'*.qcow2 '{target_storage}/{vm_name}'*.iso '{target_storage}/{vm_name}'.snapshot*")
+    # Include any disk paths documented in vm.yaml
+    for src in params.get("DISK_SOURCES", []):
+        if src.startswith("/") and os.path.basename(src) not in protected_basenames and src not in discovered_disks:
+            discovered_disks.append(src)
 
-    # Clean up workstation known_hosts to prevent key mismatch on redeploy
-    print(f"    -> Cleaning up workstation ~/.ssh/known_hosts for '{vm_name}' and '{params['VM_IP']}'...")
+    # Remove disk storage, seed ISOs, and snapshot overlays.
+    # IMPORTANT: Execute glob expansion inside `sudo bash -c` so root can list /var/lib/libvirt/images
+    # (unprivileged bash fails to expand globs in 0700/0711 directories and passes literal '*' to rm -f).
+    q_dir = shlex.quote(target_storage)
+    q_vm = shlex.quote(vm_name)
+    extra_paths_bash = " ".join(shlex.quote(p) for p in discovered_disks)
+    storage_script = (
+        f"shopt -s nullglob; "
+        f"files=({q_dir}/{q_vm}.qcow2 {q_dir}/{q_vm}-seed.iso {q_dir}/{q_vm}.* {q_dir}/{q_vm}-seed.* {extra_paths_bash}); "
+        f"removed=0; "
+        f"declare -A seen=(); "
+        f"for f in \"${{files[@]}}\"; do "
+        f"  [ -n \"$f\" ] || continue; "
+        f"  [ -z \"${{seen[$f]:-}}\" ] || continue; "
+        f"  seen[\"$f\"]=1; "
+        f"  if [ -e \"$f\" ] || [ -L \"$f\" ]; then "
+        f"    rm -f -- \"$f\" && echo \"REMOVED:$f\" && removed=$((removed+1)); "
+        f"  fi; "
+        f"done; "
+        f"leftover=(); "
+        f"for f in {q_dir}/{q_vm}.qcow2 {q_dir}/{q_vm}-seed.iso {q_dir}/{q_vm}.* {q_dir}/{q_vm}-seed.*; do "
+        f"  [ -e \"$f\" ] && leftover+=(\"$f\"); "
+        f"done; "
+        f"if [ ${{#leftover[@]}} -gt 0 ]; then "
+        f"  echo \"LEFTOVER:${{leftover[*]}}\" >&2; exit 1; "
+        f"fi; "
+        f"echo \"TOTAL_REMOVED:$removed\""
+    )
+
+    print(f"    -> Deleting VM storage images and snapshots in {target_storage} for '{vm_name}'...")
     if not dry_run:
-        subprocess.run(["ssh-keygen", "-R", vm_name], capture_output=True)
-        subprocess.run(["ssh-keygen", "-R", params["VM_IP"]], capture_output=True)
-        print(f"    [✓] Workstation known_hosts cleaned.")
+        ret, out, err = run_cmd_status(["sudo", "bash", "-c", storage_script], host=host)
+        removed_files = [ln[len("REMOVED:"):] for ln in out.splitlines() if ln.startswith("REMOVED:")]
+        if ret == 0:
+            if removed_files:
+                print(f"    [✓] Purged {len(removed_files)} storage/snapshot file(s):")
+                for rf in removed_files:
+                    print(f"        - {rf}")
+            else:
+                print("    [✓] No storage disk or snapshot files found to remove.")
+        else:
+            print(f"    [-] Warning: Storage cleanup incomplete: {err or out}")
     else:
-        print(f"    [PLAN] ssh-keygen -R {vm_name} && ssh-keygen -R {params['VM_IP']}")
+        print(f"    [PLAN] sudo bash -c \"shopt -s nullglob; rm -f {target_storage}/{vm_name}.qcow2 {target_storage}/{vm_name}-seed.iso {target_storage}/{vm_name}.* {target_storage}/{vm_name}-seed.*\"")
+
+    # Remove libvirt static DHCP reservation
+    remove_static_dhcp(params, host, dry_run=dry_run)
+
+    # Clean up workstation known_hosts, ~/.ssh/config host block, and optionally SSH keys
+    cleanup_workstation_ssh(params, purge_ssh_keys=purge_ssh_keys, dry_run=dry_run)
 
     # Clean up hypervisor proxy forwarders for this VM
     print(f"    -> Cleaning up hypervisor proxy forwarders for '{vm_name}'...")
+    legacy_unit = " airlock-proxy.socket" if vm_name == "airlock-vm" else ""
     if not dry_run:
-        cleanup_proxy_cmd = f"sudo systemctl stop '{vm_name}'-p*-proxy.socket '{vm_name}'-p*-proxy.service '{vm_name}'-proxy.socket airlock-proxy.socket 2>/dev/null || true; sudo systemctl disable '{vm_name}'-p*-proxy.socket '{vm_name}'-proxy.socket airlock-proxy.socket 2>/dev/null || true; sudo rm -f /etc/systemd/system/'{vm_name}'-p*-proxy.* /etc/systemd/system/'{vm_name}'-proxy.* 2>/dev/null || true; sudo systemctl daemon-reload 2>/dev/null || true"
-        run_cmd_status(["bash", "-c", cleanup_proxy_cmd], host=host)
+        cleanup_proxy_script = (
+            f"shopt -s nullglob; "
+            f"systemctl stop {q_vm}-p*-proxy.socket {q_vm}-p*-proxy.service {q_vm}-proxy.socket{legacy_unit} 2>/dev/null || true; "
+            f"systemctl disable {q_vm}-p*-proxy.socket {q_vm}-proxy.socket{legacy_unit} 2>/dev/null || true; "
+            f"rm -f /etc/systemd/system/{q_vm}-p*-proxy.* /etc/systemd/system/{q_vm}-proxy.* 2>/dev/null || true; "
+            f"systemctl daemon-reload 2>/dev/null || true"
+        )
+        run_cmd_status(["sudo", "bash", "-c", cleanup_proxy_script], host=host)
         print(f"    [✓] Hypervisor proxy sockets cleaned.")
     else:
         print(f"    [PLAN] sudo systemctl stop {vm_name}-p*-proxy.socket && rm -f /etc/systemd/system/{vm_name}-p*-proxy.*")
 
-    # Clean up inventory record
+    # Clean up inventory record and regenerate sync dispatcher
     sync_inventory_record(params, action="purge", dry_run=dry_run)
 
     print(f"[✓] AirlockVM VM '{vm_name}' has been entirely removed from '{host}'.\n")
@@ -1097,7 +1342,8 @@ def main():
     parser.add_argument("--start", action="store_true", help="Power on the VM domain")
     parser.add_argument("--stop", action="store_true", help="Gracefully shut down the VM domain")
     parser.add_argument("--destroy", action="store_true", help="Force terminate the VM domain")
-    parser.add_argument("--purge", action="store_true", help="Entirely remove the VM domain, nvram, snapshots, and disk storage")
+    parser.add_argument("--purge", action="store_true", help="Entirely remove the VM domain, nvram, snapshots, DHCP reservation, proxies, SSH config, and disk storage")
+    parser.add_argument("--purge-ssh-keys", action="store_true", help="When used with --purge, also delete the dedicated workstation SSH keypair (~/.ssh/<app>_vm_ed25519*)")
     parser.add_argument("--reboot", action="store_true", help="Reboot the VM domain")
     parser.add_argument("--snapshot", nargs="?", const="default", help="Create a snapshot (optional snapshot name)")
     parser.add_argument("--rollback", nargs="?", const="default", help="Revert to baseline or named snapshot")
@@ -1176,7 +1422,7 @@ def main():
         execute_power_action(params, "destroy")
         sys.exit(0)
     if args.purge:
-        execute_purge(params, host, dry_run=args.dry_run)
+        execute_purge(params, host, dry_run=args.dry_run, purge_ssh_keys=args.purge_ssh_keys)
         sys.exit(0)
     if args.reboot:
         execute_power_action(params, "reboot")

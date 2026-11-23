@@ -337,14 +337,15 @@ def derive_vm_blueprint(vm_name: str, host: str, inventory_root: Path) -> dict:
             parsed = yaml.safe_load(existing_vm_yaml.read_text(encoding="utf-8"))
             bp = parsed.get("vm", {}).get("blueprint", {})
             if bp and bp.get("project_name"):
+                ext_port = str(bp.get("proxy_external_port", 3001))
                 return {
                     "project_name": bp.get("project_name"),
                     "primary_user": bp.get("primary_user", "airlock"),
                     "secondary_user": bp.get("secondary_user", getpass.getuser()),
                     "ssh_key_path": bp.get("ssh_key_path", f"~/.ssh/{vm_name}_ed25519"),
                     "app_internal_port": str(bp.get("app_internal_port", 3000)),
-                    "proxy_external_port": str(bp.get("proxy_external_port", 3001)),
-                    "proxy_socket_service": bp.get("proxy_socket_service", f"/etc/systemd/system/{vm_name}-proxy.socket"),
+                    "proxy_external_port": ext_port,
+                    "proxy_socket_service": bp.get("proxy_socket_service", f"/etc/systemd/system/{vm_name}-p{ext_port}-proxy.socket"),
                     "remote_code_dir": bp.get("remote_code_dir", f"~/{bp.get('project_name', vm_name)}/"),
                     "guest_os": bp.get("guest_os", "Ubuntu 24.04 LTS Minimal"),
                     "guest_os_details": bp.get("guest_os_details", "Pristine Noble Numbat cloud image"),
@@ -384,7 +385,7 @@ def derive_vm_blueprint(vm_name: str, host: str, inventory_root: Path) -> dict:
         "ssh_key_path": f"~/.ssh/{prim_user}_vm_ed25519",
         "app_internal_port": int_port,
         "proxy_external_port": ext_port,
-        "proxy_socket_service": f"/etc/systemd/system/{proj_slug}-proxy.socket",
+        "proxy_socket_service": f"/etc/systemd/system/{vm_name}-p{ext_port}-proxy.socket",
         "remote_code_dir": f"~/{proj_name}/",
         "guest_os": "Ubuntu 24.04 LTS Minimal",
         "guest_os_details": "Pristine Noble Numbat cloud image",
@@ -745,14 +746,16 @@ def render_vm_yaml(vm_data: dict, template_path: Path) -> str:
     }
 
     bp = vm_data.get("blueprint", {})
+    default_ext_port = str(bp.get("proxy_external_port", 3001))
+    default_proxy_svc = f"/etc/systemd/system/{vm_data['name']}-p{default_ext_port}-proxy.socket"
     replacements.update({
         "BLUEPRINT_PROJECT_NAME": bp.get("project_name", "AirlockVM"),
         "BLUEPRINT_PRIMARY_USER": bp.get("primary_user", "airlock"),
         "BLUEPRINT_SECONDARY_USER": bp.get("secondary_user", getpass.getuser()),
         "BLUEPRINT_SSH_KEY_PATH": bp.get("ssh_key_path", "~/.ssh/airlock_vm_ed25519"),
         "BLUEPRINT_APP_INTERNAL_PORT": str(bp.get("app_internal_port", 3000)),
-        "BLUEPRINT_PROXY_EXTERNAL_PORT": str(bp.get("proxy_external_port", 3001)),
-        "BLUEPRINT_PROXY_SOCKET_SERVICE": bp.get("proxy_socket_service", "/etc/systemd/system/airlock-proxy.socket"),
+        "BLUEPRINT_PROXY_EXTERNAL_PORT": default_ext_port,
+        "BLUEPRINT_PROXY_SOCKET_SERVICE": bp.get("proxy_socket_service", default_proxy_svc),
         "BLUEPRINT_REMOTE_CODE_DIR": bp.get("remote_code_dir", "~/AirlockVM/"),
         "BLUEPRINT_GUEST_OS": bp.get("guest_os", "Ubuntu 24.04 LTS Minimal"),
         "BLUEPRINT_GUEST_OS_DETAILS": bp.get("guest_os_details", "Pristine Noble Numbat cloud image"),
@@ -816,7 +819,7 @@ def render_vm_runbook(vm_data: dict, host_data: dict, template_path: Path) -> st
         "SSH_KEY_PATH": bp.get("ssh_key_path", f"~/.ssh/{bp.get('primary_user', 'airlock')}_vm_ed25519"),
         "APP_INTERNAL_PORT": str(bp.get("app_internal_port", 3000)),
         "PROXY_EXTERNAL_PORT": str(bp.get("proxy_external_port", 3001)),
-        "PROXY_SOCKET_SERVICE": bp.get("proxy_socket_service", f"/etc/systemd/system/{vm_data['name']}-proxy.socket"),
+        "PROXY_SOCKET_SERVICE": bp.get("proxy_socket_service", f"/etc/systemd/system/{vm_data['name']}-p{bp.get('proxy_external_port', 3001)}-proxy.socket"),
         "REMOTE_CODE_DIR": bp.get("remote_code_dir", f"~/{bp.get('project_name', vm_data['name'])}/"),
         "SNAPSHOT_BASE_NAME": bp.get("snapshot_base_name", "snapshot-base-clean"),
         "SNAPSHOT_BASE_DESC": bp.get("snapshot_base_desc", "Pristine base setup with Docker and Python"),

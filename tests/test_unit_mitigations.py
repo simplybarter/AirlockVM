@@ -552,6 +552,194 @@ class TestMitigationsUnit(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("virt-customize", buf.getvalue())
 
+    def test_deploy_vm_purge_storage_dhcp_ssh_and_dispatcher(self):
+        deploy_mod = _load_module(
+            "deploy_vm_purge_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            fake_home = root / "home"
+            ssh_dir = fake_home / ".ssh"
+            ssh_dir.mkdir(parents=True)
+            inv_dir = root / "inventory"
+            vm_dir = inv_dir / "localhost" / "demo-control-vm"
+            vm_dir.mkdir(parents=True)
+            (vm_dir / "vm.yaml").write_text("vm:\n  name: demo-control-vm\n", encoding="utf-8")
+
+            key_priv = ssh_dir / "democontrol_vm_ed25519"
+            key_pub = ssh_dir / "democontrol_vm_ed25519.pub"
+            key_priv.write_text("PRIVATE", encoding="utf-8")
+            key_pub.write_text("ssh-ed25519 AAAA demo-control-vm", encoding="utf-8")
+
+            ssh_cfg = ssh_dir / "config"
+            ssh_cfg.write_text(
+                "Host other-vm\n"
+                "    HostName 192.168.122.210\n\n"
+                "# AirlockVM Execution Virtual Machine\n"
+                "Host demo-control-vm\n"
+                "    HostName 192.168.122.238\n"
+                "    User airlock\n"
+                f"    IdentityFile {key_priv}\n"
+                "    StrictHostKeyChecking no\n\n"
+                "Host demo-control-vm-02\n"
+                "    HostName 192.168.122.239\n",
+                encoding="utf-8",
+            )
+
+            params = {
+                "VM_NAME": "demo-control-vm",
+                "HYPERVISOR_HOST": "localhost",
+                "VM_IP": "192.168.122.238",
+                "VM_MAC": "52:54:00:aa:bb:cc",
+                "LIBVIRT_NETWORK": "default",
+                "SSH_KEY_PATH": str(key_priv),
+                "DISK_SOURCES": [
+                    "/var/lib/libvirt/images/demo-control-vm.snapshot-base-clean",
+                    "/var/lib/libvirt/images/demo-control-vm-seed.snapshot-base-clean",
+                ],
+            }
+
+            recorded_cmds: list[list[str]] = []
+            net_xml = (
+                "<network><ip address='192.168.122.1'><dhcp>"
+                "<host mac='52:54:00:aa:bb:cc' name='demo-control-vm' ip='192.168.122.238'/>"
+                "</dhcp></ip></network>"
+            )
+
+            def fake_run_cmd(cmd, host=None):
+                recorded_cmds.append(list(cmd))
+                if cmd[:3] == ["sudo", "virsh", "dominfo"]:
+                    return 0, "State:          running\n", ""
+                if cmd[:3] == ["sudo", "virsh", "domblklist"]:
+                    return 0, " Type   Device   Target   Source\n-----\n file   disk     vda      /var/lib/libvirt/images/demo-control-vm.snapshot-base-clean\n", ""
+                if cmd[:3] == ["sudo", "virsh", "net-dumpxml"]:
+                    return 0, net_xml, ""
+                if cmd[:3] == ["sudo", "bash", "-c"] and "TOTAL_REMOVED" in cmd[3]:
+                    return 0, "REMOVED:/var/lib/libvirt/images/demo-control-vm.qcow2\nTOTAL_REMOVED:1\n", ""
+                return 0, "", ""
+
+            subproc_calls: list[list[str]] = []
+
+            def fake_subproc(cmd, **kwargs):
+                subproc_calls.append(list(cmd))
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            old_env = os.environ.get("AIRLOCK_INVENTORY_DIR")
+            os.environ["AIRLOCK_INVENTORY_DIR"] = str(inv_dir)
+            try:
+                buf = io.StringIO()
+                with patch.object(deploy_mod, "run_cmd_status", side_effect=fake_run_cmd), \
+                     patch.object(deploy_mod, "resolve_storage_dir", return_value="/var/lib/libvirt/images"), \
+                     patch.object(deploy_mod.Path, "home", return_value=fake_home), \
+                     patch.object(deploy_mod.subprocess, "run", side_effect=fake_subproc), \
+                     redirect_stdout(buf):
+                    deploy_mod.execute_purge(params, "localhost", dry_run=False, purge_ssh_keys=True)
+            finally:
+                if old_env is not None:
+                    os.environ["AIRLOCK_INVENTORY_DIR"] = old_env
+                else:
+                    os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
+
+            # 1. Storage cleanup runs glob expansion inside `sudo bash -c` (not unprivileged bash)
+            storage_cmds = [c for c in recorded_cmds if c[:3] == ["sudo", "bash", "-c"] and "TOTAL_REMOVED" in c[3]]
+            self.assertEqual(len(storage_cmds), 1)
+            self.assertIn("shopt -s nullglob", storage_cmds[0][3])
+            self.assertIn("LEFTOVER:", storage_cmds[0][3])
+
+            # 2. Static DHCP reservation deleted via virsh net-update
+            dhcp_del_cmds = [c for c in recorded_cmds if c[:5] == ["sudo", "virsh", "net-update", "default", "delete"]]
+            self.assertEqual(len(dhcp_del_cmds), 1)
+            self.assertIn("ip-dhcp-host", dhcp_del_cmds[0])
+            self.assertIn("52:54:00:aa:bb:cc", dhcp_del_cmds[0][6])
+
+            # 3. ~/.ssh/config block removed cleanly without touching other-vm or demo-control-vm-02
+            updated_cfg = ssh_cfg.read_text(encoding="utf-8")
+            self.assertNotIn("Host demo-control-vm\n", updated_cfg)
+            self.assertIn("Host other-vm\n", updated_cfg)
+            self.assertIn("Host demo-control-vm-02\n", updated_cfg)
+
+            # 4. SSH keypair deleted when purge_ssh_keys=True
+            self.assertFalse(key_priv.exists())
+            self.assertFalse(key_pub.exists())
+
+            # 5. Dispatcher regenerated via generate_sync.py
+            self.assertTrue(any("generate_sync.py" in " ".join(c) for c in subproc_calls))
+
+    def test_create_vm_renders_requested_ram_and_canonical_proxy_socket_name(self):
+        from airlock.mcp.server import airlock_create_vm
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            inv_dir = root / "inventory"
+            host_dir = inv_dir / "localhost"
+            host_dir.mkdir(parents=True)
+            # Host with 32 GiB RAM would proportionally default to 8192 MiB if vm.yaml/overrides were ignored
+            (host_dir / "vmhost.yaml").write_text(
+                yaml.safe_dump({
+                    "vmhost": {
+                        "name": "localhost",
+                        "connection": {"host": "localhost"},
+                        "system": {"os": {"pretty_name": "Ubuntu 24.04 LTS"}},
+                        "hardware": {
+                            "cpu": {"total_cores": 16, "model": "TestCPU"},
+                            "memory": {"total_mib": 32768, "total_gb": 32},
+                        },
+                        "virtualization": {
+                            "networks": [{
+                                "name": "default",
+                                "bridge": "virbr0",
+                                "ip": "192.168.122.1",
+                                "netmask": "255.255.255.0",
+                            }]
+                        },
+                    }
+                }),
+                encoding="utf-8",
+            )
+            app_dir = root / "sample-app"
+            app_dir.mkdir()
+            (app_dir / "pyproject.toml").write_text('[project]\nname = "sample-app"\n', encoding="utf-8")
+
+            old_env = os.environ.get("AIRLOCK_INVENTORY_DIR")
+            os.environ["AIRLOCK_INVENTORY_DIR"] = str(inv_dir)
+            try:
+                with patch("airlock.ports.get_inventory_used_ports", return_value=set()), \
+                     patch("airlock.ports.get_hypervisor_live_ports", return_value=set()):
+                    res = airlock_create_vm(
+                        local_path=str(app_dir),
+                        vmhost="localhost",
+                        vm_name="sample-control-vm",
+                        app_name="sample-control",
+                        internal_port=8000,
+                        external_port=8001,
+                        vcpu=2,
+                        memory_mib=2048,
+                        disk_gib=25,
+                    )
+            finally:
+                if old_env is not None:
+                    os.environ["AIRLOCK_INVENTORY_DIR"] = old_env
+                else:
+                    os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
+
+            self.assertTrue(res["success"], res)
+            vm_yaml_path = host_dir / "sample-control-vm" / "vm.yaml"
+            vm_md_path = host_dir / "sample-control-vm" / "VM.md"
+            self.assertTrue(vm_yaml_path.exists())
+            self.assertTrue(vm_md_path.exists())
+
+            vm_doc = yaml.safe_load(vm_yaml_path.read_text(encoding="utf-8"))
+            expected_socket = "/etc/systemd/system/sample-control-vm-p8001-proxy.socket"
+            self.assertEqual(vm_doc["vm"]["blueprint"]["proxy_socket_service"], expected_socket)
+            self.assertEqual(vm_doc["vm"]["resources"]["memory_mib"], 2048)
+
+            vm_md = vm_md_path.read_text(encoding="utf-8")
+            self.assertIn("2 vCPUs | 2048 MiB RAM | 25 GiB Disk", vm_md)
+            self.assertNotIn("8192 MiB RAM", vm_md)
+            self.assertIn("2048 MiB (2 GB)", vm_md)
+            self.assertIn(expected_socket, vm_md)
+
 
 if __name__ == "__main__":
     unittest.main()

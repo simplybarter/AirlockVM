@@ -345,7 +345,7 @@ def calculate_proportional_sizing(host_cores: int, total_ram_mb: int) -> dict:
     }
 
 
-def derive_vm_naming(project_name: str, existing_domains: list[str] = None) -> dict:
+def derive_vm_naming(project_name: str, existing_domains: list[str] = None, proxy_port: int = 3001) -> dict:
     """Derives default VM name, usernames, and service paths from project name with collision prevention."""
     project_slug = re.sub(r"[^a-z0-9]+", "-", project_name.lower()).strip("-")
     base_vm_name = f"{project_slug}-vm"
@@ -363,7 +363,7 @@ def derive_vm_naming(project_name: str, existing_domains: list[str] = None) -> d
         "VM_NAME": vm_name,
         "VM_PRIMARY_USER": vm_user,
         "SSH_KEY_PATH": f"~/.ssh/{vm_user}_vm_ed25519",
-        "PROXY_SOCKET_SERVICE": f"/etc/systemd/system/{project_slug}-proxy.socket",
+        "PROXY_SOCKET_SERVICE": f"/etc/systemd/system/{vm_name}-p{proxy_port}-proxy.socket",
         "REMOTE_CODE_DIR": f"~/{project_name}/",
     }
 
@@ -498,7 +498,7 @@ def probe_all(hypervisor_host: str, project_name: str = "AirlockVM", skip_prefli
     print(f"    -> Assigned Forward Port: {proxy_port}")
 
     # Derive default VM naming from project name
-    naming = derive_vm_naming(project_name, existing_domains)
+    naming = derive_vm_naming(project_name, existing_domains, proxy_port=proxy_port)
     print(f"[*] Derived VM naming from project '{project_name}':")
     print(f"    -> Suggested VM Domain Name: {naming['VM_NAME']}")
     print(f"    -> Primary User: {naming['VM_PRIMARY_USER']}")

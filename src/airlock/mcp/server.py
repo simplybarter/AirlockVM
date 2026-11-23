@@ -477,6 +477,9 @@ def airlock_create_vm(
     yaml_path = vm_dir / "vm.yaml"
     runbook_path = vm_dir / "VM.md"
 
+    proxy_socket_service = f"/etc/systemd/system/{vm_name}-p{allocated_port}-proxy.socket"
+    memory_gb = max(1, memory_mib // 1024)
+
     # Build SSOT YAML structure
     now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     vm_doc = {
@@ -490,7 +493,7 @@ def airlock_create_vm(
             "resources": {
                 "vcpu": vcpu,
                 "memory_mib": memory_mib,
-                "memory_gb": max(1, memory_mib // 1024),
+                "memory_gb": memory_gb,
             },
             "disks": [
                 {
@@ -530,7 +533,7 @@ def airlock_create_vm(
                 "ssh_key_path": f"~/.ssh/{slug}_vm_ed25519",
                 "app_internal_port": internal_port,
                 "proxy_external_port": allocated_port,
-                "proxy_socket_service": f"/etc/systemd/system/{slug}-proxy.socket",
+                "proxy_socket_service": proxy_socket_service,
                 "remote_code_dir": f"~/{slug}/",
                 "guest_os": "Ubuntu 24.04 LTS Minimal",
                 "guest_os_details": "Pristine Noble Numbat cloud image",
@@ -568,13 +571,19 @@ def airlock_create_vm(
         str(PYTHON_BIN),
         str(CONFIGURE_SCRIPT),
         "--from-inventory", vmhost,
+        "--vm", vm_name,
         "--set", f"PROJECT_NAME={app_name}",
         "--set", f"VM_NAME={vm_name}",
+        "--set", f"VCPU_CORES={vcpu}",
+        "--set", f"RAM_MIB={memory_mib}",
+        "--set", f"RAM_GB={memory_gb}",
+        "--set", f"DISK_SIZE_GIB={disk_gib}",
         "--set", f"VM_IP={allocated_ip}",
         "--set", f"VM_MAC={allocated_mac}",
+        "--set", "VM_PRIMARY_USER=airlock",
         "--set", f"APP_INTERNAL_PORT={internal_port}",
         "--set", f"PROXY_EXTERNAL_PORT={allocated_port}",
-        "--set", f"PROXY_SOCKET_SERVICE=/etc/systemd/system/{slug}-proxy.socket",
+        "--set", f"PROXY_SOCKET_SERVICE={proxy_socket_service}",
         "--set", f"REMOTE_CODE_DIR=~/{slug}/",
         "--set", f"SSH_KEY_PATH=~/.ssh/{slug}_vm_ed25519",
         "--output", str(runbook_path),

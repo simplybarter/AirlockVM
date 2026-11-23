@@ -223,7 +223,7 @@ def load_from_inventory(host: str, repo_root: Path, target_vm: str | None = None
             "SSH_KEY_PATH": f"~/.ssh/{proj_slug.replace('-', '')}_vm_ed25519",
             "APP_INTERNAL_PORT": "3000",
             "PROXY_EXTERNAL_PORT": "3001",
-            "PROXY_SOCKET_SERVICE": f"/etc/systemd/system/{proj_slug}-proxy.socket",
+            "PROXY_SOCKET_SERVICE": f"/etc/systemd/system/{cand_vm_name}-p3001-proxy.socket",
             "REMOTE_CODE_DIR": f"~/{DEFAULT_PROJECT_NAME}/",
             "SNAPSHOT_BASE_NAME": "snapshot-base-clean",
             "SNAPSHOT_BASE_DESC": "Pristine base setup with Docker and Python",
@@ -295,7 +295,8 @@ def render_template(template_str: str, params: dict) -> tuple[str, list[str]]:
     return rendered, sorted(list(set(unresolved)))
 
 
-def auto_derive_helpers(params: dict) -> None:
+def auto_derive_helpers(params: dict, explicit_keys: set[str] | None = None) -> None:
+    explicit_keys = explicit_keys or set()
     # Default PROJECT_NAME to repository root folder name if not specified
     if not params.get("PROJECT_NAME"):
         params["PROJECT_NAME"] = DEFAULT_PROJECT_NAME
@@ -310,13 +311,14 @@ def auto_derive_helpers(params: dict) -> None:
         params["SSH_KEY_PATH"] = f"~/.ssh/{params['VM_PRIMARY_USER']}_vm_ed25519"
     if not params.get("REMOTE_CODE_DIR"):
         params["REMOTE_CODE_DIR"] = f"~/{params['PROJECT_NAME']}/"
+    ext_port = params.get("PROXY_EXTERNAL_PORT") or "3001"
     if not params.get("PROXY_SOCKET_SERVICE"):
-        params["PROXY_SOCKET_SERVICE"] = f"/etc/systemd/system/{proj_slug}-proxy.socket"
+        params["PROXY_SOCKET_SERVICE"] = f"/etc/systemd/system/{params['VM_NAME']}-p{ext_port}-proxy.socket"
 
-    # Auto-derive RAM_GB if RAM_MIB is set
-    if params.get("RAM_MIB") and not params.get("RAM_GB"):
+    # Auto-derive RAM_GB if RAM_MIB is set (and recompute if RAM_MIB was explicitly overridden without RAM_GB)
+    if params.get("RAM_MIB") and (not params.get("RAM_GB") or ("RAM_MIB" in explicit_keys and "RAM_GB" not in explicit_keys)):
         try:
-            params["RAM_GB"] = str(int(params["RAM_MIB"]) // 1024)
+            params["RAM_GB"] = str(max(1, int(params["RAM_MIB"]) // 1024))
         except ValueError:
             pass
 
@@ -492,19 +494,22 @@ def main():
             params.update(user_config)
 
     # 3. Layer command-line overrides (--set KEY=VALUE)
+    explicit_keys: set[str] = set()
     if args.set_vars:
         for item in args.set_vars:
             if "=" not in item:
                 print(f"Error: Invalid --set format '{item}'. Use KEY=VALUE.", file=sys.stderr)
                 sys.exit(1)
             k, v = item.split("=", 1)
-            params[k.strip()] = v.strip()
+            key_clean = k.strip()
+            params[key_clean] = v.strip()
+            explicit_keys.add(key_clean)
 
     # 4. Interactive mode if requested
     if args.interactive:
         params = prompt_user_for_params(params)
 
-    auto_derive_helpers(params)
+    auto_derive_helpers(params, explicit_keys=explicit_keys)
 
     # 5. Read template
     if not args.template.exists():
