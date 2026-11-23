@@ -1171,6 +1171,55 @@ class TestMitigationsUnit(unittest.TestCase):
             self.assertIn("airlock", gdoc["mcpServers"])
             self.assertEqual(gdoc["mcpServers"]["existing-tool"], {"command": "/usr/bin/existing"})
 
+    def test_generate_sync_post_deploy_heredoc_quoting_proxy_host_and_mcp_delete(self):
+        import subprocess
+        from airlock.mcp.server import airlock_deploy_app
+
+        sync_mod = _load_module(
+            "generate_sync_post_deploy_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_rsync" / "scripts" / "generate_sync.py",
+        )
+        exclusions = sync_mod.evaluate_project_exclusions()
+        script = sync_mod.generate_shell_script(
+            "demo-control-vm",
+            [{
+                "name": "demo-app",
+                "local_path": "../demo-app",
+                "remote_path": "~/demo-app/",
+                "post_deploy": 'uv run uvicorn main:app --host 0.0.0.0 --port 8000',
+                "internal_port": 8000,
+                "external_port": 8001,
+            }],
+            exclusions,
+            hypervisor_host="localhost",
+        )
+
+        # 1. Generated bash script passes `bash -n` syntax validation
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sp = Path(tmpdir) / "deploy_app_to_airlock.sh"
+            sp.write_text(script, encoding="utf-8")
+            chk = subprocess.run(["bash", "-n", str(sp)], capture_output=True, text=True)
+            self.assertEqual(chk.returncode, 0, chk.stderr)
+
+        # 2. Remote post_deploy uses single-quoted heredoc with properly quoted "$cmd_str" and graceful kill -TERM
+        self.assertIn("<<'POST_DEPLOY_EOF'", script)
+        self.assertIn('nohup bash -lc "$cmd_str" </dev/null > app.log 2>&1 &', script)
+        self.assertIn("kill -TERM $old_pids", script)
+        self.assertNotIn('bash -lc "\\$cmd_str"', script)
+
+        # 3. Proxy URL uses HYPERVISOR_HOST (localhost), not VM_HOST
+        self.assertIn('HYPERVISOR_HOST="localhost"', script)
+        self.assertIn("http://$HYPERVISOR_HOST:$ext_port/", script)
+        self.assertNotIn("http://$VM_HOST:$ext_port/", script)
+
+        # 4. airlock_deploy_app forwards --delete when delete=True
+        with patch("airlock.mcp.server._run_command", return_value={"success": True, "returncode": 0, "stdout": "ok", "stderr": ""}) as mock_run:
+            res = airlock_deploy_app("demo-control-vm", delete=True, dry_run=True)
+        self.assertTrue(res["success"])
+        called_cmd = mock_run.call_args[0][0]
+        self.assertIn("--delete", called_cmd)
+        self.assertIn("--dry-run", called_cmd)
+
 
 if __name__ == "__main__":
     unittest.main()

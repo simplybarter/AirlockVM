@@ -1084,6 +1084,7 @@ def airlock_deploy_app(
     vm_name: str,
     app_name: str = "",
     dry_run: bool = False,
+    delete: bool = False,
     no_restart: bool = False,
     offline: bool = False,
     checkpoint: bool = False,
@@ -1095,6 +1096,7 @@ def airlock_deploy_app(
         vm_name: Target VM domain name (e.g. 'airlock-vm').
         app_name: Optional specific repository to deploy. If omitted, all attached repositories are synced.
         dry_run: When True, inspects file candidates and displays the deployment plan without syncing files.
+        delete: When True, passes --delete to rsync to remove remote files that no longer exist locally.
         no_restart: When True, syncs files but skips post-deploy commands.
         offline: When True, generates local file inventory without connecting over the network.
         checkpoint: When True, takes an automated snapshot baseline before deployment.
@@ -1110,6 +1112,8 @@ def airlock_deploy_app(
         cmd.extend(["--repo", app_name])
     if dry_run:
         cmd.append("--dry-run")
+    if delete:
+        cmd.append("--delete")
     if no_restart:
         cmd.append("--no-restart")
     if offline:

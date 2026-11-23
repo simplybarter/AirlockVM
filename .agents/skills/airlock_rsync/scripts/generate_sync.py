@@ -206,7 +206,12 @@ def _expand_include_patterns(patterns: list[str]) -> list[str]:
     return expanded
 
 
-def generate_shell_script(vm_host: str, repos: list[dict], exclusions: list[str]) -> str:
+def generate_shell_script(
+    vm_host: str,
+    repos: list[dict],
+    exclusions: list[str],
+    hypervisor_host: str = "localhost",
+) -> str:
     """Renders a robust deploy_app_to_airlock.sh bash script supporting multi-repo synchronization."""
     exclude_items = "\n".join(f"  --exclude='{exc}'" for exc in exclusions)
     repo_lines = []
@@ -234,6 +239,7 @@ def generate_shell_script(vm_host: str, repos: list[dict], exclusions: list[str]
 set -euo pipefail
 
 VM_HOST="__VM_HOST__"
+HYPERVISOR_HOST="__HYPERVISOR_HOST__"
 LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DRY_RUN=false
@@ -294,7 +300,7 @@ $(for entry in "${REPOSITORIES[@]}"; do
   post_cmd="$(decode_post_cmd "${post_b64:-}")"
   int_port="${int_port:-3000}"
   ext_port="${ext_port:-3001}"
-  echo "  - $rname: $lpath -> $VM_HOST:$rpath (http://$VM_HOST:$ext_port/ -> :$int_port)"
+  echo "  - $rname: $lpath -> $VM_HOST:$rpath (http://$HYPERVISOR_HOST:$ext_port/ -> :$int_port)"
   if [[ -n "$post_cmd" ]]; then
     echo "      post-deploy: '$post_cmd'"
   fi
@@ -467,7 +473,7 @@ for entry in "${REPOSITORIES[@]}"; do
   echo ""
   echo "------------------------------------------------------------"
   echo " Synchronizing '$rname': $lpath -> $VM_HOST:$rpath"
-  echo " Hypervisor Route: http://$VM_HOST:$ext_port/ -> :$int_port"
+  echo " Hypervisor Route: http://$HYPERVISOR_HOST:$ext_port/ -> :$int_port"
   echo "------------------------------------------------------------"
 
   if [[ ! -d "$lpath" ]]; then
@@ -497,7 +503,23 @@ for entry in "${REPOSITORIES[@]}"; do
     else
       echo "[*] Executing post-deploy command on $VM_HOST (PORT=$int_port):"
       echo "    -> cd $remote_dir && export HOST=0.0.0.0 PORT=$int_port && (nohup $post_cmd </dev/null > app.log 2>&1 &)"
-      ssh "$VM_HOST" "old_pid=\\$(ss -tlnp 'sport = :${int_port}' 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); [ -n \"\\$old_pid\" ] && kill -9 \\$old_pid 2>/dev/null || true; cd $remote_dir && export HOST=0.0.0.0 PORT=$int_port && cmd_str=\\$(printf '%s' '${post_b64}' | base64 -d) && (nohup bash -lc \"\\$cmd_str\" </dev/null > app.log 2>&1 &) && sleep 1"
+      ssh "$VM_HOST" bash -s -- "$rpath" "$int_port" "$post_b64" <<'POST_DEPLOY_EOF'
+set -euo pipefail
+target_dir="${1/#\\~/$HOME}"
+int_port="$2"
+post_b64="$3"
+old_pids="$(ss -tlnp "sport = :${int_port}" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u || true)"
+if [[ -n "$old_pids" ]]; then
+  kill -TERM $old_pids 2>/dev/null || true
+  sleep 0.5
+  kill -9 $old_pids 2>/dev/null || true
+fi
+cd "$target_dir"
+export HOST=0.0.0.0 PORT="$int_port"
+cmd_str="$(printf '%s' "$post_b64" | base64 -d)"
+nohup bash -lc "$cmd_str" </dev/null > app.log 2>&1 &
+sleep 1
+POST_DEPLOY_EOF
       echo "[✓] Post-deploy command completed."
     fi
   fi
@@ -516,6 +538,7 @@ fi
 """
     return (
         template.replace("__VM_HOST__", vm_host)
+        .replace("__HYPERVISOR_HOST__", hypervisor_host)
         .replace("__EXCLUDE_ITEMS__", exclude_items)
         .replace("__REPOSITORY_ENTRIES__", repo_entries)
     )
@@ -721,6 +744,23 @@ def load_vm_repos(vm_yaml_path: Path) -> tuple[str, list[dict]]:
     }]
 
 
+def resolve_hypervisor_host(vm_yaml_path: Path | None) -> str:
+    """Resolves the hypervisor hostname from vm.yaml (or its parent inventory directory)."""
+    if not vm_yaml_path or not vm_yaml_path.exists():
+        return "localhost"
+    if yaml is not None:
+        try:
+            doc = yaml.safe_load(vm_yaml_path.read_text(encoding="utf-8")) or {}
+            host = doc.get("vm", {}).get("host")
+            if host:
+                return str(host).strip()
+        except Exception:
+            pass
+    if len(vm_yaml_path.parents) >= 2:
+        return vm_yaml_path.parents[1].name
+    return "localhost"
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Evaluate project and generate sync scripts for inventory VMs and project root"
@@ -747,8 +787,9 @@ def main():
         print(f"[*] Generating deploy_app_to_airlock.sh for {len(vm_yamls)} VM(s) in {inv_dir}...")
         for yf in vm_yamls:
             vm_name, repos = load_vm_repos(yf)
+            hv_host = resolve_hypervisor_host(yf)
             vm_sync_file = yf.parent / "deploy_app_to_airlock.sh"
-            content = generate_shell_script(vm_name, repos, exclusions)
+            content = generate_shell_script(vm_name, repos, exclusions, hypervisor_host=hv_host)
             vm_sync_file.write_text(content, encoding="utf-8")
             vm_sync_file.chmod(0o755)
             print(f"    [✓] Generated: {format_path(vm_sync_file)} ({len(repos)} repo(s))")
@@ -766,15 +807,17 @@ def main():
 
     if matching_yaml:
         vm_name, repos = load_vm_repos(matching_yaml)
+        target_hv_host = resolve_hypervisor_host(matching_yaml)
     else:
         vm_name = target_host
+        target_hv_host = "localhost"
         repos = [{"name": REPO_ROOT.name, "local_path": str(REPO_ROOT), "remote_path": args.remote_dir or default_dir}]
 
     # Determine output script destination and content
     if args.output:
         # User specified custom output path -> write specific VM sync script
         out_path = args.output
-        content = generate_shell_script(vm_name, repos, exclusions)
+        content = generate_shell_script(vm_name, repos, exclusions, hypervisor_host=target_hv_host)
         out_path.write_text(content, encoding="utf-8")
         out_path.chmod(0o755)
         print(f"[✓] Successfully generated custom deployment script: {out_path}")
