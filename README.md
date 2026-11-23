@@ -85,7 +85,7 @@ By strictly separating software engineering workstations from runtime execution 
 │   ├── profiler.py                          # Live guest RAM/swap/CPU workload profiler
 │   ├── security.py                          # Workstation zero-workload & secret leak audit
 │   └── mcp/                                 # Model Context Protocol service
-│       └── server.py                        # AirlockVM FastMCP Server (23 declarative tools)
+│       └── server.py                        # AirlockVM FastMCP Server (26 declarative tools)
 ├── tests/                                   # Integration & permutation test suites
 │   └── test_integration_permutations.py     # 26-permutation end-to-end test suite
 ├── docs/                                    # Architecture, security & MCP documentation

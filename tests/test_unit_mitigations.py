@@ -740,6 +740,201 @@ class TestMitigationsUnit(unittest.TestCase):
             self.assertIn("2048 MiB (2 GB)", vm_md)
             self.assertIn(expected_socket, vm_md)
 
+    def test_list_hypervisors_mcp_and_cli(self):
+        from airlock.mcp.server import airlock_list_hypervisors
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inv_dir = Path(tmpdir)
+            host_dir = inv_dir / "testhost"
+            host_dir.mkdir(parents=True)
+            (host_dir / "vmhost.yaml").write_text(
+                yaml.safe_dump({
+                    "vmhost": {
+                        "name": "testhost",
+                        "alias": "testhost",
+                        "connection": {"type": "ssh", "host": "testhost"},
+                        "system": {"hostname": "testhost", "os": {"pretty_name": "Ubuntu 24.04 LTS"}},
+                        "hardware": {
+                            "cpu": {"model": "TestCPU", "total_cores": 12, "kvm_present": True, "vt_enabled": True},
+                            "memory": {"total_mib": 32768, "total_gb": 32, "available_mib": 24000},
+                            "storage": {
+                                "root_filesystem": {"total_gb": 500, "available_gb": 320},
+                                "pools": [{"name": "default", "path": "/var/lib/libvirt/images", "state": "active"}],
+                            },
+                        },
+                        "virtualization": {
+                            "networks": [{"name": "default", "bridge": "virbr0", "ip": "192.168.122.1", "netmask": "255.255.255.0"}]
+                        },
+                        "vms": {"count": 2, "running_count": 1},
+                    }
+                }),
+                encoding="utf-8",
+            )
+            old_env = os.environ.get("AIRLOCK_INVENTORY_DIR")
+            os.environ["AIRLOCK_INVENTORY_DIR"] = str(inv_dir)
+            try:
+                with patch("airlock.inventory.get_inventory_search_dirs", return_value=[inv_dir]), \
+                     patch("airlock.mcp.server.get_inventory_search_dirs", return_value=[inv_dir]):
+                    res = airlock_list_hypervisors(live_probe=False)
+                self.assertTrue(res["success"])
+                self.assertEqual(res["total_hypervisors"], 1)
+                h = res["hypervisors"][0]
+                self.assertEqual(h["host"], "testhost")
+                self.assertEqual(h["total_cores"], 12)
+                self.assertEqual(h["available_ram_mib"], 24000)
+                self.assertEqual(h["available_disk_gb"], 320)
+                self.assertEqual(h["running_vms"], 1)
+                self.assertEqual(h["vm_count"], 2)
+
+                buf = io.StringIO()
+                with patch("airlock.cli.airlock_list_hypervisors", return_value=res), redirect_stdout(buf):
+                    rc = cli.main(["hosts"])
+                self.assertEqual(rc, 0)
+                self.assertIn("testhost", buf.getvalue())
+                self.assertIn("24000/32768 MiB", buf.getvalue())
+            finally:
+                if old_env is not None:
+                    os.environ["AIRLOCK_INVENTORY_DIR"] = old_env
+                else:
+                    os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
+
+    def test_update_vm_mcp_and_cli(self):
+        from airlock.mcp.server import airlock_update_vm
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inv_dir = Path(tmpdir)
+            host_dir = inv_dir / "localhost"
+            vm_dir = host_dir / "editable-vm"
+            vm_dir.mkdir(parents=True)
+            (host_dir / "vmhost.yaml").write_text(
+                yaml.safe_dump({
+                    "vmhost": {
+                        "name": "localhost",
+                        "connection": {"host": "localhost"},
+                        "system": {"os": {"pretty_name": "Ubuntu 24.04 LTS"}},
+                        "hardware": {
+                            "cpu": {"total_cores": 8, "model": "TestCPU"},
+                            "memory": {"total_mib": 16384, "total_gb": 16},
+                        },
+                        "virtualization": {
+                            "networks": [{"name": "default", "bridge": "virbr0", "ip": "192.168.122.1", "netmask": "255.255.255.0"}]
+                        },
+                    }
+                }),
+                encoding="utf-8",
+            )
+            (vm_dir / "vm.yaml").write_text(
+                yaml.safe_dump({
+                    "vm": {
+                        "name": "editable-vm",
+                        "host": "localhost",
+                        "state": "shut off",
+                        "resources": {"vcpu": 2, "memory_mib": 2048, "memory_gb": 2},
+                        "network": {"interfaces": [{"ip": "192.168.122.240", "mac": "52:54:00:aa:bb:cc"}]},
+                        "blueprint": {
+                            "project_name": "EditableApp",
+                            "primary_user": "airlock",
+                            "app_internal_port": 3000,
+                            "proxy_external_port": 3001,
+                            "proxy_socket_service": "/etc/systemd/system/editable-vm-p3001-proxy.socket",
+                            "disk_size_gib": 20,
+                            "remote_code_dir": "~/editable-app/",
+                            "repositories": [{
+                                "name": "EditableApp",
+                                "local_path": str(tmpdir),
+                                "remote_path": "~/editable-app/",
+                                "internal_port": 3000,
+                                "external_port": 3001,
+                                "post_deploy": "python3 app.py",
+                            }],
+                        },
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+            old_env = os.environ.get("AIRLOCK_INVENTORY_DIR")
+            os.environ["AIRLOCK_INVENTORY_DIR"] = str(inv_dir)
+            try:
+                res = airlock_update_vm(
+                    vm_name="editable-vm",
+                    vcpu=4,
+                    memory_mib=4096,
+                    disk_size_gib=60,
+                    external_port=8081,
+                    post_deploy="uvicorn main:app --host 0.0.0.0 --port 3000",
+                )
+                self.assertTrue(res["success"], res)
+                self.assertTrue(res["changed"])
+                self.assertIn("vcpu", res["changes"])
+                self.assertIn("memory_mib", res["changes"])
+                self.assertIn("disk_size_gib", res["changes"])
+                self.assertIn("proxy_external_port", res["changes"])
+                self.assertIn("post_deploy", res["changes"])
+
+                updated_doc = yaml.safe_load((vm_dir / "vm.yaml").read_text(encoding="utf-8"))
+                self.assertEqual(updated_doc["vm"]["resources"]["vcpu"], 4)
+                self.assertEqual(updated_doc["vm"]["resources"]["memory_mib"], 4096)
+                self.assertEqual(updated_doc["vm"]["resources"]["memory_gb"], 4)
+                self.assertEqual(updated_doc["vm"]["blueprint"]["disk_size_gib"], 60)
+                self.assertEqual(updated_doc["vm"]["blueprint"]["proxy_socket_service"], "/etc/systemd/system/editable-vm-p8081-proxy.socket")
+                self.assertEqual(updated_doc["vm"]["blueprint"]["repositories"][0]["post_deploy"], "uvicorn main:app --host 0.0.0.0 --port 3000")
+
+                vm_md = (vm_dir / "VM.md").read_text(encoding="utf-8")
+                self.assertIn("4 vCPUs | 4096 MiB RAM | 60 GiB Disk", vm_md)
+                self.assertIn("/etc/systemd/system/editable-vm-p8081-proxy.socket", vm_md)
+
+                # CLI airlock update subcommand
+                buf = io.StringIO()
+                with patch("airlock.cli.airlock_update_vm", return_value={"success": True, "message": "Updated editable-vm", "changes": {"vcpu": {"old": 4, "new": 6}}, "warnings": []}) as mock_upd, \
+                     redirect_stdout(buf):
+                    rc = cli.main(["update", "editable-vm", "--vcpu", "6"])
+                self.assertEqual(rc, 0)
+                mock_upd.assert_called_once()
+                self.assertIn("vcpu: 4 -> 6", buf.getvalue())
+            finally:
+                if old_env is not None:
+                    os.environ["AIRLOCK_INVENTORY_DIR"] = old_env
+                else:
+                    os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
+
+    def test_purge_vm_mcp_and_cli(self):
+        from airlock.mcp.server import airlock_purge_vm
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inv_dir = Path(tmpdir)
+            vm_dir = inv_dir / "localhost" / "disposable-vm"
+            vm_dir.mkdir(parents=True)
+            (vm_dir / "vm.yaml").write_text("vm:\n  name: disposable-vm\n  host: localhost\n", encoding="utf-8")
+
+            old_env = os.environ.get("AIRLOCK_INVENTORY_DIR")
+            os.environ["AIRLOCK_INVENTORY_DIR"] = str(inv_dir)
+            try:
+                with patch("airlock.mcp.server._run_command", return_value={"success": True, "returncode": 0, "stdout": "[PLAN] purge", "stderr": ""}) as mock_run:
+                    res = airlock_purge_vm("disposable-vm", dry_run=True, purge_ssh_keys=True)
+                self.assertTrue(res["success"])
+                called_cmd = mock_run.call_args[0][0]
+                self.assertIn("--purge", called_cmd)
+                self.assertIn("--dry-run", called_cmd)
+                self.assertIn("--purge-ssh-keys", called_cmd)
+
+                # Invalid VM name rejected
+                bad = airlock_purge_vm("bad;vm")
+                self.assertFalse(bad["success"])
+
+                # CLI airlock purge subcommand with --dry-run (skips confirmation prompt)
+                buf = io.StringIO()
+                with patch("airlock.cli.airlock_purge_vm", return_value={"success": True, "stdout": "[PLAN] purge", "stderr": ""}) as mock_cli_purge, \
+                     redirect_stdout(buf):
+                    rc = cli.main(["purge", "disposable-vm", "--dry-run", "--purge-ssh-keys"])
+                self.assertEqual(rc, 0)
+                mock_cli_purge.assert_called_once_with(vm_name="disposable-vm", dry_run=True, purge_ssh_keys=True)
+            finally:
+                if old_env is not None:
+                    os.environ["AIRLOCK_INVENTORY_DIR"] = old_env
+                else:
+                    os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
+
 
 if __name__ == "__main__":
     unittest.main()

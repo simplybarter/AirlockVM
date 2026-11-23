@@ -71,6 +71,7 @@ The MCP server exposes standard, declarative tools enabling agents to inspect, d
 | Tool Name | Parameters | Description |
 | :--- | :--- | :--- |
 | `airlock_list` | *(none)* | Discovers and lists all registered hypervisors and VMs across active inventory search paths (`~/.airlock/inventory/` or `$AIRLOCK_INVENTORY_DIR`), including their allocated IPs, mapped repositories, and external forwarding ports. |
+| `airlock_list_hypervisors` | `live_probe: bool = False` | Enumerates all registered hypervisors from `vmhost.yaml` along with CPU cores, RAM headroom, storage pools, networks, and VM counts; optionally probes live RAM and CPU load. |
 | `airlock_status` | `vm_name: str` | Queries the target VM's live status (`running`, `shut off`, etc.), current IP lease, uptime, and available disk snapshots. |
 | `airlock_detect_app` | `local_path: str` | Intelligently inspects project manifests (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `compose.yaml`) to infer framework, internal port, and `post_deploy` command. |
 | `airlock_health_check` | `vm_name: str`<br/>`app_name: str = ""` <br/>`path: str = "/"` | Probes the live hypervisor route with retries. If failing or crashing, automatically connects to the VM over SSH and captures runtime logs for instant diagnosis. |
@@ -93,7 +94,8 @@ The MCP server exposes standard, declarative tools enabling agents to inspect, d
 
 | Tool Name | Parameters | Description |
 | :--- | :--- | :--- |
-| `airlock_power` | `vm_name: str`<br/>`action: "start" \| "stop" \| "reboot"` | Issues power state transitions via libvirt (`virsh start`, `virsh shutdown`, `virsh reboot`). |
+| `airlock_power` | `vm_name: str`<br/>`action: "start" \| "stop" \| "reboot" \| "destroy"` | Issues power state transitions via libvirt (`virsh start`, `virsh shutdown`, `virsh reboot`, `virsh destroy`). |
+| `airlock_purge_vm` | `vm_name: str`<br/>`dry_run: bool = False`<br/>`purge_ssh_keys: bool = False` | Permanently removes a VM domain, NVRAM, disk/snapshot images, libvirt static DHCP reservation, proxy sockets, `~/.ssh/config` host block, and inventory record (regenerating the sync dispatcher). |
 | `airlock_checkpoint` | `vm_name: str`<br/>`action: "create" \| "revert"`<br/>`snapshot_name: str = ""` | Creates automated pre-deployment disk snapshot checkpoints or reverts back to a clean state if experimental workloads crash. |
 | `airlock_snapshot` | `vm_name: str`<br/>`action: "create" \| "revert" \| "list"`<br/>`snapshot_name: str = ""` | Manages disk-only snapshots (`virsh snapshot-create-as` / `virsh snapshot-revert`), enabling rapid clean-state rollbacks after running experimental workloads. |
 
@@ -102,6 +104,7 @@ The MCP server exposes standard, declarative tools enabling agents to inspect, d
 | Tool Name | Parameters | Description |
 | :--- | :--- | :--- |
 | `airlock_create_vm` | `local_path: str`<br/>`vmhost: str = ""` <br/>`vm_name: str = ""` <br/>`app_name: str = ""` <br/>`internal_port: int = 0`<br/>`external_port: int = 0`<br/>`post_deploy: str = ""` <br/>`vcpu: int = 4`<br/>`memory_mib: int = 2048`<br/>`disk_gib: int = 50` | Generates a new dedicated execution virtual machine specification and runbook in `inventory/{vmhost}/{vm}/` for an application. Auto-detects stack/ports/commands, selects optimal hypervisor, allocates static IP/MAC and conflict-free proxy ports, and regenerates sync scripts. |
+| `airlock_update_vm` | `vm_name: str`<br/>`vcpu: int = 0`<br/>`memory_mib: int = 0`<br/>`disk_size_gib: int = 0`<br/>`internal_port: int = 0`<br/>`external_port: int = 0`<br/>`post_deploy: str \| None = None`<br/>`app_name: str = ""` | Updates an existing VM's resources, ports, or `post_deploy` command in `vm.yaml`, automatically updating `proxy_socket_service`, re-rendering `VM.md`, and regenerating sync scripts. |
 | `airlock_attach_app` | `vm_name: str`<br/>`local_path: str`<br/>`app_name: str = ""` <br/>`internal_port: int = 0`<br/>`external_port: int = 0`<br/>`post_deploy: str = ""` | Registers or updates an application repository in an existing `inventory/{vmhost}/{vm}/vm.yaml`. Auto-detects stack/ports/commands if omitted, and auto-allocates conflict-free host ports. |
 | `airlock_preflight` | `vm_name: str` | Non-destructive pre-flight deployability confirmation: live probe of SSH/sudo, /dev/kvm, libvirtd, IP silence, port conflicts, disk headroom, and host RAM safety. Returns verdict (`READY_TO_DEPLOY` / `BLOCKED`) with confidence score. |
 | `airlock_deploy_vm` | `vm_name: str`<br/>`dry_run: bool = False` | Enforces pre-flight capability checks and provisions/updates the VM domain: SSH key generation, static DHCP reservations on `virbr0`, cloud-init NoCloud ISO seeding, `virt-install`, and hypervisor `systemd-socket-proxyd` forwarders for all mapped repository ports. |

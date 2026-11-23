@@ -31,13 +31,13 @@ from airlock.inventory import (
     list_inventory_hosts,
 )
 from airlock.network import allocate_vm_network
-from airlock.placement import select_optimal_hypervisor
+from airlock.placement import inspect_hypervisor, select_optimal_hypervisor
 from airlock.ports import allocate_external_port
 from airlock.preflight import validate_deployment_preflight
 from airlock.profiler import profile_workload
 from airlock.security import audit_vm_security
 from airlock.snapshots import create_pre_deploy_checkpoint, rollback_checkpoint
-from airlock.transport import get_python_bin, resolve_asset_path, resolve_sync_dispatcher
+from airlock.transport import get_python_bin, resolve_asset_path, resolve_sync_dispatcher, validate_identifier
 
 # AirlockVM canonical root directory and script resolution
 AIRLOCK_ROOT = Path(__file__).resolve().parents[3]
@@ -141,6 +141,97 @@ def airlock_list() -> dict[str, Any]:
                 continue
 
     return {"success": True, "vms": vms, "total_vms": len(vms)}
+
+
+@server.tool()
+def airlock_list_hypervisors(live_probe: bool = False) -> dict[str, Any]:
+    """Lists all registered hypervisors in inventory along with hardware capacity, storage pools, networks, and VM counts.
+
+    Args:
+        live_probe: When True, probes each hypervisor over SSH/local shell for live available RAM and 1m load average.
+    """
+    hypervisors: list[dict[str, Any]] = []
+    seen_hosts: set[str] = set()
+
+    for inv_dir in get_inventory_search_dirs():
+        if not inv_dir.exists():
+            continue
+        for host_yaml_path in sorted(inv_dir.glob("*/vmhost.yaml")):
+            host_key = host_yaml_path.parent.name
+            if host_key in seen_hosts:
+                continue
+            try:
+                with open(host_yaml_path, "r", encoding="utf-8") as f:
+                    doc = yaml.safe_load(f) or {}
+                vmhost = doc.get("vmhost", {})
+                if not isinstance(vmhost, dict):
+                    continue
+                seen_hosts.add(host_key)
+
+                conn = vmhost.get("connection", {}) or {}
+                sys_info = vmhost.get("system", {}) or {}
+                hw = vmhost.get("hardware", {}) or {}
+                cpu = hw.get("cpu", {}) or {}
+                mem = hw.get("memory", {}) or {}
+                storage = hw.get("storage", {}) or {}
+                root_fs = storage.get("root_filesystem", {}) or {}
+                virt = vmhost.get("virtualization", {}) or {}
+                vms_info = vmhost.get("vms", {}) or {}
+
+                # Count documented VM directories as fallback if vmhost.yaml has not been refreshed
+                documented_vms = [p.name for p in host_yaml_path.parent.iterdir() if p.is_dir() and (p / "vm.yaml").exists()]
+                vm_count = vms_info.get("count")
+                if vm_count is None:
+                    vm_count = len(documented_vms)
+
+                entry: dict[str, Any] = {
+                    "host": vmhost.get("name", host_key),
+                    "alias": vmhost.get("alias", sys_info.get("hostname", host_key)),
+                    "connection_type": conn.get("type", "local" if host_key in ("localhost", "127.0.0.1") else "ssh"),
+                    "os": (sys_info.get("os") or {}).get("pretty_name", "unknown"),
+                    "cpu_model": cpu.get("model", "unknown"),
+                    "total_cores": int(cpu.get("total_cores", 0) or 0),
+                    "kvm_present": bool(cpu.get("kvm_present", False)),
+                    "vt_enabled": bool(cpu.get("vt_enabled", False)),
+                    "total_ram_mib": int(mem.get("total_mib", 0) or 0),
+                    "total_ram_gb": int(mem.get("total_gb", 0) or 0),
+                    "available_ram_mib": int(mem.get("available_mib", 0) or 0),
+                    "total_disk_gb": int(root_fs.get("total_gb", 0) or 0),
+                    "available_disk_gb": int(root_fs.get("available_gb", 0) or 0),
+                    "storage_pools": storage.get("pools", []) or [],
+                    "networks": [
+                        {
+                            "name": n.get("name", ""),
+                            "bridge": n.get("bridge", ""),
+                            "ip": n.get("ip", ""),
+                            "netmask": n.get("netmask", ""),
+                        }
+                        for n in (virt.get("networks") or [])
+                        if isinstance(n, dict)
+                    ],
+                    "vm_count": int(vm_count),
+                    "running_vms": int(vms_info.get("running_count", 0) or 0),
+                    "live_probe": False,
+                    "load_average_1m": None,
+                    "config_path": format_config_path(host_yaml_path),
+                }
+
+                if live_probe:
+                    live = inspect_hypervisor(host_key)
+                    if live.get("success") and live.get("live_probe"):
+                        entry["live_probe"] = True
+                        entry["available_ram_mib"] = live.get("available_ram_mib", entry["available_ram_mib"])
+                        entry["load_average_1m"] = live.get("load_average_1m")
+
+                hypervisors.append(entry)
+            except Exception:
+                continue
+
+    return {
+        "success": True,
+        "hypervisors": hypervisors,
+        "total_hypervisors": len(hypervisors),
+    }
 
 
 @server.tool()
@@ -624,6 +715,176 @@ def airlock_create_vm(
 
 
 @server.tool()
+def airlock_update_vm(
+    vm_name: str,
+    vcpu: int = 0,
+    memory_mib: int = 0,
+    disk_size_gib: int = 0,
+    internal_port: int = 0,
+    external_port: int = 0,
+    post_deploy: str | None = None,
+    app_name: str = "",
+) -> dict[str, Any]:
+    """Updates an existing VM specification in inventory/{vmhost}/{vm}/vm.yaml, re-renders VM.md, and regenerates sync scripts.
+
+    Allows modifying resources (vCPU, RAM, disk size), ports, or post-deploy commands before deployment
+    (or before re-provisioning) without hand-editing vm.yaml or VM.md.
+
+    Args:
+        vm_name: Target VM domain name in inventory.
+        vcpu: New virtual CPU count (>0 to update).
+        memory_mib: New memory allocation in MiB (>0 to update; automatically updates memory_gb).
+        disk_size_gib: New virtual disk size in GiB (>0 to update).
+        internal_port: New internal application port (>0 to update).
+        external_port: New hypervisor proxy port (>0 to update; automatically updates proxy_socket_service).
+        post_deploy: New post-deploy command for the repository (pass "" to clear; omit/None to leave unchanged).
+        app_name: Optional repository name when targeting a specific app on a multi-app VM.
+    """
+    yaml_path, doc = _find_vm_yaml(vm_name)
+    if not yaml_path or not doc:
+        return {"success": False, "error": f"VM '{vm_name}' not found in inventory."}
+
+    if vcpu < 0 or memory_mib < 0 or disk_size_gib < 0 or internal_port < 0 or external_port < 0:
+        return {"success": False, "error": "Numeric resource and port overrides must be non-negative integers."}
+    if internal_port > 65535 or external_port > 65535:
+        return {"success": False, "error": "Port numbers must be between 1 and 65535."}
+
+    vm_data = doc.setdefault("vm", {})
+    vmhost = vm_data.get("host", yaml_path.parents[1].name)
+    resources = vm_data.setdefault("resources", {})
+    bp = vm_data.setdefault("blueprint", {})
+    repos = bp.setdefault("repositories", [])
+
+    changes: dict[str, dict[str, Any]] = {}
+
+    if vcpu > 0 and resources.get("vcpu") != vcpu:
+        changes["vcpu"] = {"old": resources.get("vcpu"), "new": vcpu}
+        resources["vcpu"] = vcpu
+
+    if memory_mib > 0 and resources.get("memory_mib") != memory_mib:
+        changes["memory_mib"] = {"old": resources.get("memory_mib"), "new": memory_mib}
+        resources["memory_mib"] = memory_mib
+        resources["memory_gb"] = max(1, memory_mib // 1024)
+
+    if disk_size_gib > 0 and bp.get("disk_size_gib") != disk_size_gib:
+        changes["disk_size_gib"] = {"old": bp.get("disk_size_gib"), "new": disk_size_gib}
+        bp["disk_size_gib"] = disk_size_gib
+
+    # Resolve target repository entry if updating app-level settings
+    target_repo = None
+    if repos:
+        if app_name:
+            target_repo = next((r for r in repos if isinstance(r, dict) and r.get("name") == app_name), None)
+            if target_repo is None:
+                return {"success": False, "error": f"Repository '{app_name}' not found on VM '{vm_name}'."}
+        else:
+            target_repo = repos[0] if isinstance(repos[0], dict) else None
+
+    if internal_port > 0:
+        if bp.get("app_internal_port") != internal_port:
+            changes["app_internal_port"] = {"old": bp.get("app_internal_port"), "new": internal_port}
+            bp["app_internal_port"] = internal_port
+        if target_repo is not None and target_repo.get("internal_port") != internal_port:
+            target_repo["internal_port"] = internal_port
+
+    if external_port > 0:
+        new_socket = f"/etc/systemd/system/{vm_name}-p{external_port}-proxy.socket"
+        if bp.get("proxy_external_port") != external_port:
+            changes["proxy_external_port"] = {"old": bp.get("proxy_external_port"), "new": external_port}
+            bp["proxy_external_port"] = external_port
+        if bp.get("proxy_socket_service") != new_socket:
+            changes["proxy_socket_service"] = {"old": bp.get("proxy_socket_service"), "new": new_socket}
+            bp["proxy_socket_service"] = new_socket
+        if target_repo is not None and target_repo.get("external_port") != external_port:
+            target_repo["external_port"] = external_port
+
+    if post_deploy is not None:
+        if target_repo is None:
+            return {"success": False, "error": f"VM '{vm_name}' has no repositories configured to update post_deploy."}
+        if target_repo.get("post_deploy") != post_deploy:
+            changes["post_deploy"] = {"old": target_repo.get("post_deploy", ""), "new": post_deploy}
+            target_repo["post_deploy"] = post_deploy
+
+    if not changes:
+        return {
+            "success": True,
+            "vm_name": vm_name,
+            "host": vmhost,
+            "changed": False,
+            "changes": {},
+            "config_path": format_config_path(yaml_path),
+            "message": f"No changes applied to VM '{vm_name}'.",
+        }
+
+    # Persist updated vm.yaml SSOT
+    with open(yaml_path, "w", encoding="utf-8") as f:
+        yaml.dump(doc, f, sort_keys=False)
+
+    # Re-render VM.md runbook from updated SSOT
+    runbook_path = yaml_path.parent / "VM.md"
+    final_vcpu = int(resources.get("vcpu", 4))
+    final_ram_mib = int(resources.get("memory_mib", 2048))
+    final_ram_gb = max(1, final_ram_mib // 1024)
+    final_disk_gib = int(bp.get("disk_size_gib", 50))
+    final_int_port = int(bp.get("app_internal_port", 3000))
+    final_ext_port = int(bp.get("proxy_external_port", 3001))
+    final_proxy_svc = str(bp.get("proxy_socket_service", f"/etc/systemd/system/{vm_name}-p{final_ext_port}-proxy.socket"))
+    ifaces = vm_data.get("network", {}).get("interfaces", [])
+    primary_ip = ifaces[0].get("ip", "") if ifaces else ""
+    primary_mac = ifaces[0].get("mac", "") if ifaces else ""
+
+    conf_cmd = [
+        str(PYTHON_BIN),
+        str(CONFIGURE_SCRIPT),
+        "--from-inventory", vmhost,
+        "--vm", vm_name,
+        "--set", f"VM_NAME={vm_name}",
+        "--set", f"VCPU_CORES={final_vcpu}",
+        "--set", f"RAM_MIB={final_ram_mib}",
+        "--set", f"RAM_GB={final_ram_gb}",
+        "--set", f"DISK_SIZE_GIB={final_disk_gib}",
+        "--set", f"APP_INTERNAL_PORT={final_int_port}",
+        "--set", f"PROXY_EXTERNAL_PORT={final_ext_port}",
+        "--set", f"PROXY_SOCKET_SERVICE={final_proxy_svc}",
+        "--output", str(runbook_path),
+    ]
+    if primary_ip:
+        conf_cmd.extend(["--set", f"VM_IP={primary_ip}"])
+    if primary_mac:
+        conf_cmd.extend(["--set", f"VM_MAC={primary_mac}"])
+    conf_res = _run_command(conf_cmd)
+
+    # Regenerate sync scripts
+    sync_res = _run_command([str(PYTHON_BIN), str(GENERATE_SYNC_SCRIPT)])
+
+    warnings: list[str] = []
+    if not conf_res.get("success"):
+        warnings.append(f"Runbook regeneration failed: {conf_res.get('stderr') or conf_res.get('stdout')}")
+    if not sync_res.get("success"):
+        warnings.append(f"Sync script regeneration failed: {sync_res.get('stderr') or sync_res.get('stdout')}")
+    if str(vm_data.get("state", "shut off")).lower() == "running" and any(
+        k in changes for k in ("vcpu", "memory_mib", "disk_size_gib")
+    ):
+        warnings.append(
+            "VM is currently running; hardware resource changes apply when the VM is re-provisioned or reconciled."
+        )
+
+    return {
+        "success": True,
+        "vm_name": vm_name,
+        "host": vmhost,
+        "changed": True,
+        "changes": changes,
+        "config_path": format_config_path(yaml_path),
+        "runbook_path": format_config_path(runbook_path),
+        "runbook_generated": bool(conf_res.get("success")),
+        "sync_generated": bool(sync_res.get("success")),
+        "warnings": warnings,
+        "message": f"Updated VM '{vm_name}' ({', '.join(changes.keys())}) and refreshed VM.md and sync scripts.",
+    }
+
+
+@server.tool()
 def airlock_attach_app(
     vm_name: str,
     local_path: str,
@@ -844,6 +1105,41 @@ def airlock_power(vm_name: str, action: str) -> dict[str, Any]:
     res = _run_command(cmd, timeout=60)
     res["vm_name"] = vm_name
     res["action"] = action
+    return res
+
+
+@server.tool()
+def airlock_purge_vm(
+    vm_name: str,
+    dry_run: bool = False,
+    purge_ssh_keys: bool = False,
+) -> dict[str, Any]:
+    """Permanently removes a VM domain, NVRAM, disk images, snapshots, DHCP reservation, proxy sockets, SSH config block, and inventory record.
+
+    Args:
+        vm_name: Target VM domain name in inventory.
+        dry_run: When True, previews all purge steps without modifying the hypervisor or workstation.
+        purge_ssh_keys: When True, also deletes the VM's dedicated workstation SSH keypair (~/.ssh/<app>_vm_ed25519*).
+    """
+    try:
+        safe_vm = validate_identifier(vm_name, "VM name")
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+
+    yaml_path, _ = _find_vm_yaml(safe_vm)
+    if not yaml_path:
+        return {"success": False, "error": f"VM '{safe_vm}' not found in inventory."}
+
+    cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", safe_vm, "--purge"]
+    if dry_run:
+        cmd.append("--dry-run")
+    if purge_ssh_keys:
+        cmd.append("--purge-ssh-keys")
+
+    res = _run_command(cmd, timeout=120)
+    res["vm_name"] = safe_vm
+    res["dry_run"] = dry_run
+    res["purge_ssh_keys"] = purge_ssh_keys
     return res
 
 

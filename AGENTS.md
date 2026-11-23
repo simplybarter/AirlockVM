@@ -75,6 +75,7 @@ The Model Context Protocol control plane exposes a complete tool suite for codin
 1. **Observability & Inspection**:
    * `airlock_ping`: Verifies control plane readiness and runtime version.
    * `airlock_list`: Enumerates all hypervisors and VMs in `inventory/`.
+   * `airlock_list_hypervisors(live_probe)`: Lists registered hypervisors with CPU, RAM, storage pools, networks, and VM counts.
    * `airlock_status(vm_name)`: Queries live libvirt domain status and hardware states.
 
 2. **Application Stack Detection**:
@@ -87,7 +88,9 @@ The Model Context Protocol control plane exposes a complete tool suite for codin
 
 4. **Lifecycle Topologies**:
    * `airlock_create_vm(...)`: Provisions a dedicated virtual machine domain (`vm.yaml`, `VM.md`, deployment scripts).
+   * `airlock_update_vm(...)`: Updates VM resources (`vcpu`, `memory_mib`, `disk_size_gib`), ports, or `post_deploy` in `vm.yaml`, re-rendering `VM.md` and sync scripts.
    * `airlock_attach_app(...)`: Attaches a repository to an existing shared worker VM with idempotent updates.
+   * `airlock_purge_vm(vm_name, dry_run, purge_ssh_keys)`: Permanently removes a VM domain, disk/snapshot images, DHCP reservation, proxies, SSH config block, and inventory record.
 
 5. **Autonomous Intelligence Engines**:
    * `airlock_preflight(vm_name)`: Executes 8 pre-requisite safety gates before provisioning (verdict: `READY_TO_DEPLOY` or `BLOCKED`).

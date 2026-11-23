@@ -18,10 +18,13 @@ from airlock.mcp.server import (
     airlock_diagnose,
     airlock_exec,
     airlock_list,
+    airlock_list_hypervisors,
     airlock_ping,
     airlock_preflight,
+    airlock_purge_vm,
     airlock_snapshot,
     airlock_status,
+    airlock_update_vm,
 )
 from airlock.transport import get_python_bin, resolve_asset_path, resolve_sync_dispatcher, validate_identifier
 
@@ -241,6 +244,78 @@ def cmd_bake_image(args: argparse.Namespace) -> int:
     return 0 if res.get("success") else 1
 
 
+def cmd_hosts(args: argparse.Namespace) -> int:
+    res = airlock_list_hypervisors(live_probe=args.live)
+    hosts = res.get("hypervisors", [])
+    if not hosts:
+        print("No hypervisors currently documented in inventory.")
+        return 0
+
+    print(f"\nAirlockVM Hypervisors ({len(hosts)} registered):")
+    if args.live:
+        print(f"{'HOST':<16} {'CONN':<6} {'CORES':<6} {'RAM (AVAIL/TOT)':<18} {'DISK AVAIL':<11} {'VMS':<7} {'LOAD':<6} {'OS'}")
+        print("-" * 96)
+    else:
+        print(f"{'HOST':<16} {'CONN':<6} {'CORES':<6} {'RAM (AVAIL/TOT)':<18} {'DISK AVAIL':<11} {'VMS':<7} {'OS'}")
+        print("-" * 88)
+
+    for h in hosts:
+        ram_str = f"{h['available_ram_mib']}/{h['total_ram_mib']} MiB"
+        disk_str = f"{h['available_disk_gb']} GB"
+        vms_str = f"{h['running_vms']}/{h['vm_count']}"
+        if args.live:
+            load_str = f"{h['load_average_1m']:.2f}" if h.get("load_average_1m") is not None else "-"
+            print(f"{h['host']:<16} {h['connection_type']:<6} {h['total_cores']:<6} {ram_str:<18} {disk_str:<11} {vms_str:<7} {load_str:<6} {h['os']}")
+        else:
+            print(f"{h['host']:<16} {h['connection_type']:<6} {h['total_cores']:<6} {ram_str:<18} {disk_str:<11} {vms_str:<7} {h['os']}")
+    print()
+    return 0
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    res = airlock_update_vm(
+        vm_name=args.vm_name,
+        vcpu=args.vcpu or 0,
+        memory_mib=args.memory_mib or 0,
+        disk_size_gib=args.disk_gib or 0,
+        internal_port=args.internal_port or 0,
+        external_port=args.external_port or 0,
+        post_deploy=args.post_deploy,
+        app_name=args.app_name or "",
+    )
+    if not res.get("success"):
+        print(f"Error updating VM '{args.vm_name}': {res.get('error', 'unknown error')}", file=sys.stderr)
+        return 1
+    print(res.get("message", "VM updated."))
+    for field, diff in (res.get("changes") or {}).items():
+        print(f"  - {field}: {diff.get('old')} -> {diff.get('new')}")
+    for w in res.get("warnings") or []:
+        print(f"  [!] {w}")
+    return 0
+
+
+def cmd_purge(args: argparse.Namespace) -> int:
+    if not args.dry_run and not args.yes:
+        confirm = input(
+            f"Permanently purge VM '{args.vm_name}' (domain, disks, snapshots, DHCP reservation, proxies, SSH config)? [y/N]: "
+        ).strip().lower()
+        if confirm not in ("y", "yes"):
+            print("Purge cancelled.")
+            return 0
+    res = airlock_purge_vm(
+        vm_name=args.vm_name,
+        dry_run=args.dry_run,
+        purge_ssh_keys=args.purge_ssh_keys,
+    )
+    if res.get("stdout"):
+        print(res["stdout"])
+    if res.get("stderr"):
+        print(res["stderr"], file=sys.stderr)
+    if not res.get("success") and res.get("error"):
+        print(f"Error: {res['error']}", file=sys.stderr)
+    return 0 if res.get("success") else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="airlock",
@@ -318,6 +393,28 @@ def main(argv: list[str] | None = None) -> int:
     p_bake.add_argument("--force", action="store_true", help="Overwrite existing golden base image")
     p_bake.add_argument("--dry-run", action="store_true", help="Preview golden image baking plan")
 
+    # hosts
+    p_hosts = subparsers.add_parser("hosts", help="List registered hypervisors and their resource capacity")
+    p_hosts.add_argument("--live", action="store_true", help="Probe hypervisors live for current available RAM and CPU load")
+
+    # update
+    p_update = subparsers.add_parser("update", help="Update VM resources, ports, or post-deploy command in inventory SSOT")
+    p_update.add_argument("vm_name", help="Domain name of target VM")
+    p_update.add_argument("--vcpu", type=int, default=0, help="New virtual CPU count")
+    p_update.add_argument("--memory-mib", type=int, default=0, help="New RAM allocation in MiB")
+    p_update.add_argument("--disk-gib", type=int, default=0, help="New virtual disk size in GiB")
+    p_update.add_argument("--internal-port", type=int, default=0, help="New internal application port")
+    p_update.add_argument("--external-port", type=int, default=0, help="New hypervisor proxy external port")
+    p_update.add_argument("--post-deploy", default=None, help="New post-deploy command (pass empty string to clear)")
+    p_update.add_argument("--app-name", default="", help="Optional repository name on a multi-app VM")
+
+    # purge
+    p_purge = subparsers.add_parser("purge", help="Permanently remove a VM domain, disks, snapshots, DHCP lease, proxies, and SSH config")
+    p_purge.add_argument("vm_name", help="Domain name of target VM")
+    p_purge.add_argument("--dry-run", action="store_true", help="Preview purge actions without modifying hypervisor or workstation")
+    p_purge.add_argument("--purge-ssh-keys", action="store_true", help="Also delete the VM's dedicated workstation SSH keypair")
+    p_purge.add_argument("--yes", "-y", action="store_true", help="Skip interactive confirmation prompt")
+
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
@@ -326,9 +423,12 @@ def main(argv: list[str] | None = None) -> int:
     commands = {
         "ping": cmd_ping,
         "list": cmd_list,
+        "hosts": cmd_hosts,
         "status": cmd_status,
         "probe": cmd_probe,
         "deploy": cmd_deploy,
+        "update": cmd_update,
+        "purge": cmd_purge,
         "sync": cmd_sync,
         "connect": cmd_connect,
         "preflight": cmd_preflight,
