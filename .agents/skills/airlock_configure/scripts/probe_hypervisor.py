@@ -520,7 +520,7 @@ def probe_all(hypervisor_host: str, project_name: str = "AirlockVM", skip_prefli
         "RAM_MIB": sizing["RAM_MIB"],
         "RAM_GB": sizing["RAM_GB"],
         "BALLOON_DRIVER": "virtio-balloon",
-        "DISK_SIZE_GIB": "50",
+        "DISK_SIZE_GIB": "20",
         "DISK_FORMAT": "qcow2",
         "UEFI_FIRMWARE": "OVMF_CODE_4M.ms.fd",
         "VM_IP": topo_info["VM_IP"],

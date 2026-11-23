@@ -9,7 +9,117 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
+import tomllib
 from typing import Any
+
+
+def _detect_python_project(path: Path) -> tuple[str, str, int, str, str, list[str], dict[str, Any]]:
+    """Inspects a Python project (pyproject.toml, uv.lock, requirements.txt, entrypoints).
+
+    Returns:
+        (app_name, framework, internal_port, post_deploy, confidence, detected_files, extras)
+    """
+    detected: list[str] = []
+    app_name = path.name
+    is_uv = False
+    python_version = ""
+    deps_blob_parts: list[str] = []
+
+    pyproject_path = path / "pyproject.toml"
+    if pyproject_path.exists():
+        detected.append("pyproject.toml")
+        try:
+            py_doc = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+            proj = py_doc.get("project", {}) or {}
+            if isinstance(proj.get("name"), str) and proj["name"].strip():
+                app_name = proj["name"].strip()
+            for dep in proj.get("dependencies", []) or []:
+                deps_blob_parts.append(str(dep).lower())
+            for group_deps in (proj.get("optional-dependencies") or {}).values():
+                for dep in group_deps or []:
+                    deps_blob_parts.append(str(dep).lower())
+            for group_deps in (py_doc.get("dependency-groups") or {}).values():
+                for dep in group_deps or []:
+                    if isinstance(dep, str):
+                        deps_blob_parts.append(dep.lower())
+            if "uv" in (py_doc.get("tool") or {}):
+                is_uv = True
+        except Exception:
+            pass
+
+    if (path / "uv.lock").exists():
+        is_uv = True
+        detected.append("uv.lock")
+
+    py_ver_file = path / ".python-version"
+    if py_ver_file.exists():
+        detected.append(".python-version")
+        try:
+            python_version = py_ver_file.read_text(encoding="utf-8").strip().splitlines()[0].strip()
+        except Exception:
+            pass
+
+    req_path = path / "requirements.txt"
+    if req_path.exists():
+        detected.append("requirements.txt")
+        try:
+            deps_blob_parts.append(req_path.read_text(encoding="utf-8").lower())
+        except Exception:
+            pass
+
+    deps_blob = "\n".join(deps_blob_parts)
+
+    # Collect root Python files excluding non-entrypoint build/test helpers
+    ignored_py = {"setup.py", "conftest.py", "__init__.py"}
+    py_files = sorted(f.name for f in path.glob("*.py") if f.name not in ignored_py)
+    detected.extend(py_files[:3])
+
+    runner_py = "uv run python" if is_uv else "python3"
+    uv_prefix = "uv run " if is_uv else ""
+    extras: dict[str, Any] = {
+        "package_manager": "uv" if is_uv else "pip",
+    }
+    if python_version:
+        extras["python_version"] = python_version
+
+    def _find_asgi_target() -> str:
+        for cand_file, target in (("main.py", "main:app"), ("app.py", "app:app"), ("server.py", "server:app")):
+            if (path / cand_file).exists():
+                return target
+        if (path / "app" / "main.py").exists():
+            return "app.main:app"
+        return ""
+
+    if "fastapi" in deps_blob or "uvicorn" in deps_blob:
+        framework = "Python (uv, FastAPI/Uvicorn)" if is_uv else "Python (FastAPI/Uvicorn)"
+        internal_port = 8000
+        asgi_target = _find_asgi_target()
+        post_deploy = f"{uv_prefix}uvicorn {asgi_target} --host 0.0.0.0 --port 8000" if asgi_target else ""
+        confidence = "high" if asgi_target else "medium"
+    elif "flask" in deps_blob:
+        framework = "Python (uv, Flask)" if is_uv else "Python (Flask)"
+        internal_port = 5000
+        has_flask_entry = (path / "app.py").exists() or (path / "wsgi.py").exists()
+        post_deploy = f"{uv_prefix}flask run --host 0.0.0.0 --port 5000" if has_flask_entry else ""
+        confidence = "high" if has_flask_entry else "medium"
+    elif "django" in deps_blob or (path / "manage.py").exists():
+        framework = "Python (uv, Django)" if is_uv else "Python (Django)"
+        internal_port = 8000
+        post_deploy = f"{runner_py} manage.py runserver 0.0.0.0:8000" if (path / "manage.py").exists() else ""
+        confidence = "high" if post_deploy else "medium"
+    else:
+        framework = "Python (uv)" if is_uv else "Python"
+        internal_port = 8000
+        # Only set post_deploy if a concrete runnable entrypoint script actually exists
+        entry_script = next((cand for cand in ("main.py", "app.py", "server.py", "run.py") if (path / cand).exists()), "")
+        if entry_script:
+            post_deploy = f"{runner_py} {entry_script}"
+            confidence = "medium"
+        else:
+            post_deploy = ""
+            confidence = "medium" if (is_uv or pyproject_path.exists()) else "low"
+
+    return app_name, framework, internal_port, post_deploy, confidence, detected, extras
 
 
 def detect_application(local_path: str | Path) -> dict[str, Any]:
@@ -92,44 +202,15 @@ def detect_application(local_path: str | Path) -> dict[str, Any]:
         except Exception:
             pass
 
-    # 2. Python (pyproject.toml, requirements.txt, Pipfile)
-    elif (path / "pyproject.toml").exists() or (path / "requirements.txt").exists() or any(path.glob("*.py")):
-        if (path / "pyproject.toml").exists():
-            detected_files.append("pyproject.toml")
-        if (path / "requirements.txt").exists():
-            detected_files.append("requirements.txt")
-
-        # Inspect python entry files
-        py_files = [f.name for f in path.glob("*.py")]
-        detected_files.extend(py_files[:3])
-        req_content = ""
-        if (path / "requirements.txt").exists():
-            try:
-                req_content = (path / "requirements.txt").read_text(encoding="utf-8").lower()
-            except Exception:
-                pass
-
-        if "fastapi" in req_content or "uvicorn" in req_content or any("main.py" == f for f in py_files):
-            framework = "Python (FastAPI/Uvicorn)"
-            internal_port = 8000
-            post_deploy = "uvicorn main:app --host 0.0.0.0 --port 8000"
-            confidence = "high"
-        elif "flask" in req_content or any("app.py" == f for f in py_files):
-            framework = "Python (Flask)"
-            internal_port = 5000
-            post_deploy = "flask run --host 0.0.0.0 --port 5000"
-            confidence = "high"
-        elif "django" in req_content or (path / "manage.py").exists():
-            framework = "Python (Django)"
-            internal_port = 8000
-            post_deploy = "python manage.py runserver 0.0.0.0:8000"
-            confidence = "high"
-        else:
-            framework = "Python"
-            internal_port = 8000
-            main_script = "main.py" if (path / "main.py").exists() else ("app.py" if (path / "app.py").exists() else (py_files[0] if py_files else "main.py"))
-            post_deploy = f"python3 {main_script}"
-            confidence = "medium"
+    # 2. Python (pyproject.toml, uv.lock, requirements.txt, or root *.py)
+    elif (
+        (path / "pyproject.toml").exists()
+        or (path / "uv.lock").exists()
+        or (path / "requirements.txt").exists()
+        or any(path.glob("*.py"))
+    ):
+        app_name, framework, internal_port, post_deploy, confidence, py_detected, py_extras = _detect_python_project(path)
+        detected_files.extend(py_detected)
 
     # 3. Rust (Cargo.toml)
     elif (path / "Cargo.toml").exists():
@@ -178,7 +259,7 @@ def detect_application(local_path: str | Path) -> dict[str, Any]:
     if env_port is not None:
         internal_port = env_port
 
-    return {
+    result: dict[str, Any] = {
         "success": True,
         "app_name": app_name,
         "framework": framework,
@@ -187,3 +268,6 @@ def detect_application(local_path: str | Path) -> dict[str, Any]:
         "detected_files": detected_files,
         "confidence": confidence,
     }
+    if "py_extras" in locals():
+        result.update(py_extras)
+    return result

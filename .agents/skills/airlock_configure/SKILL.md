@@ -126,7 +126,7 @@ Parameters specific to the development workstation, application stack, and provi
 | `GUEST_OS_DETAILS` | Guest OS image release details | `Pristine Noble Numbat cloud image` |
 | `CPU_MODE` | KVM CPU mode | `host-passthrough` |
 | `BALLOON_DRIVER` | Memory ballooning driver | `virtio-balloon` |
-| `DISK_SIZE_GIB` | Virtual root disk size in GiB | `50` |
+| `DISK_SIZE_GIB` | Virtual root disk size in GiB | `20` |
 | `DISK_FORMAT` | Virtual disk image format | `qcow2` |
 | `UEFI_FIRMWARE` | UEFI code file name | `OVMF_CODE_4M.ms.fd` |
 | `SNAPSHOT_BASE_NAME` | Baseline snapshot name for rollback | `snapshot-base-clean` |

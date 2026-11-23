@@ -64,7 +64,7 @@ def validate_deployment_preflight(vm_name: str) -> dict[str, Any]:
     target_ip = ifaces[0].get("ip", "") if ifaces else ""
     target_mac = ifaces[0].get("mac", "") if ifaces else ""
     requested_ram_mib = int(res.get("memory_mib", 2048))
-    requested_disk_gib = int(bp.get("disk_size_gib", 50))
+    requested_disk_gib = int(bp.get("disk_size_gib", 20))
     ext_port = int(bp.get("proxy_external_port", 3001))
 
     checks: dict[str, dict[str, Any]] = {}

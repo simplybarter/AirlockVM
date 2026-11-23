@@ -351,7 +351,7 @@ def derive_vm_blueprint(vm_name: str, host: str, inventory_root: Path) -> dict:
                     "guest_os_details": bp.get("guest_os_details", "Pristine Noble Numbat cloud image"),
                     "cpu_mode": bp.get("cpu_mode", "host-passthrough"),
                     "balloon_driver": bp.get("balloon_driver", "virtio-balloon"),
-                    "disk_size_gib": str(bp.get("disk_size_gib", 50)),
+                    "disk_size_gib": str(bp.get("disk_size_gib", 20)),
                     "disk_format": bp.get("disk_format", "qcow2"),
                     "uefi_firmware": bp.get("uefi_firmware", "OVMF_CODE_4M.ms.fd"),
                     "snapshot_base_name": bp.get("snapshot_base_name", "snapshot-base-clean"),
@@ -391,7 +391,7 @@ def derive_vm_blueprint(vm_name: str, host: str, inventory_root: Path) -> dict:
         "guest_os_details": "Pristine Noble Numbat cloud image",
         "cpu_mode": "host-passthrough",
         "balloon_driver": "virtio-balloon",
-        "disk_size_gib": "50",
+        "disk_size_gib": "20",
         "disk_format": "qcow2",
         "uefi_firmware": "OVMF_CODE_4M.ms.fd",
         "snapshot_base_name": "snapshot-base-clean",
@@ -700,6 +700,16 @@ def render_repositories_yaml(vm_data: dict, bp: dict) -> str:
         lines.append(f"          external_port: {int(r.get('external_port', default_ext))}")
         post_deploy = r.get("post_deploy", "") or ""
         lines.append(f"          post_deploy: {json.dumps(str(post_deploy))}")
+        inc_list = r.get("include") or []
+        if isinstance(inc_list, list) and inc_list:
+            lines.append("          include:")
+            for pat in inc_list:
+                lines.append(f"            - {json.dumps(str(pat))}")
+        exc_list = r.get("exclude") or []
+        if isinstance(exc_list, list) and exc_list:
+            lines.append("          exclude:")
+            for pat in exc_list:
+                lines.append(f"            - {json.dumps(str(pat))}")
     return "\n".join(lines)
 
 
@@ -761,7 +771,7 @@ def render_vm_yaml(vm_data: dict, template_path: Path) -> str:
         "BLUEPRINT_GUEST_OS_DETAILS": bp.get("guest_os_details", "Pristine Noble Numbat cloud image"),
         "BLUEPRINT_CPU_MODE": bp.get("cpu_mode", "host-passthrough"),
         "BLUEPRINT_BALLOON_DRIVER": bp.get("balloon_driver", "virtio-balloon"),
-        "BLUEPRINT_DISK_SIZE_GIB": str(bp.get("disk_size_gib", 50)),
+        "BLUEPRINT_DISK_SIZE_GIB": str(bp.get("disk_size_gib", 20)),
         "BLUEPRINT_DISK_FORMAT": bp.get("disk_format", "qcow2"),
         "BLUEPRINT_UEFI_FIRMWARE": bp.get("uefi_firmware", "OVMF_CODE_4M.ms.fd"),
         "BLUEPRINT_SNAPSHOT_BASE_NAME": bp.get("snapshot_base_name", "snapshot-base-clean"),
@@ -806,7 +816,7 @@ def render_vm_runbook(vm_data: dict, host_data: dict, template_path: Path) -> st
         "RAM_MIB": str(vm_data["memory_mib"]),
         "RAM_GB": str(vm_data["memory_gb"]),
         "BALLOON_DRIVER": bp.get("balloon_driver", "virtio-balloon"),
-        "DISK_SIZE_GIB": str(bp.get("disk_size_gib", 50)),
+        "DISK_SIZE_GIB": str(bp.get("disk_size_gib", 20)),
         "DISK_FORMAT": bp.get("disk_format", "qcow2"),
         "UEFI_FIRMWARE": bp.get("uefi_firmware", "OVMF_CODE_4M.ms.fd"),
         "VM_IP": primary_ip,

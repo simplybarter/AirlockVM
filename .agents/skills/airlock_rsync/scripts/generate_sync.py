@@ -173,6 +173,39 @@ def evaluate_project_exclusions() -> list[str]:
     return unique_exclusions
 
 
+def _expand_include_patterns(patterns: list[str]) -> list[str]:
+    """Expands nested include patterns so rsync descends through otherwise-excluded parent directories.
+
+    Example: 'docs/templates/' -> ['docs/', 'docs/templates/', 'docs/templates/***']
+    Example: 'docs/templates/index.md' -> ['docs/', 'docs/templates/', 'docs/templates/index.md']
+    """
+    expanded: list[str] = []
+    seen: set[str] = set()
+
+    def _add(p: str) -> None:
+        if p and p not in seen:
+            seen.add(p)
+            expanded.append(p)
+
+    for raw in patterns:
+        pat = str(raw).strip().lstrip("./")
+        if not pat:
+            continue
+        is_dir = pat.endswith("/")
+        clean = pat.rstrip("/")
+        parts = [p for p in clean.split("/") if p]
+        # Add parent directories so rsync traverses into nested paths even if top-level dir is excluded
+        for i in range(1, len(parts)):
+            if not any(ch in parts[i - 1] for ch in "*?["):
+                _add("/".join(parts[:i]) + "/")
+        if is_dir:
+            _add(clean + "/")
+            _add(clean + "/***")
+        else:
+            _add(pat)
+    return expanded
+
+
 def generate_shell_script(vm_host: str, repos: list[dict], exclusions: list[str]) -> str:
     """Renders a robust deploy_app_to_airlock.sh bash script supporting multi-repo synchronization."""
     exclude_items = "\n".join(f"  --exclude='{exc}'" for exc in exclusions)
@@ -180,8 +213,14 @@ def generate_shell_script(vm_host: str, repos: list[dict], exclusions: list[str]
     for r in repos:
         post_raw = str(r.get("post_deploy", "") or "")
         post_b64 = base64.b64encode(post_raw.encode("utf-8")).decode("ascii") if post_raw else ""
+        inc_raw = r.get("include") or []
+        exc_raw = r.get("exclude") or []
+        inc_list = _expand_include_patterns(inc_raw) if isinstance(inc_raw, list) else []
+        exc_list = [str(x).strip() for x in exc_raw if str(x).strip()] if isinstance(exc_raw, list) else []
+        inc_b64 = base64.b64encode("\n".join(inc_list).encode("utf-8")).decode("ascii") if inc_list else ""
+        exc_b64 = base64.b64encode("\n".join(exc_list).encode("utf-8")).decode("ascii") if exc_list else ""
         repo_lines.append(
-            f'  "{r["name"]}|{r["local_path"]}|{r["remote_path"]}|{post_b64}|{r.get("internal_port", 3000)}|{r.get("external_port", 3001)}"'
+            f'  "{r["name"]}|{r["local_path"]}|{r["remote_path"]}|{post_b64}|{r.get("internal_port", 3000)}|{r.get("external_port", 3001)}|{inc_b64}|{exc_b64}"'
         )
     repo_entries = "\n".join(repo_lines)
 
@@ -208,15 +247,36 @@ EXCLUDE_ARGS=(
 __EXCLUDE_ITEMS__
 )
 
-# Configured application repositories (name|local_path|remote_path|post_deploy_b64|internal_port|external_port)
+# Configured application repositories (name|local_path|remote_path|post_deploy_b64|internal_port|external_port|include_b64|exclude_b64)
 REPOSITORIES=(
 __REPOSITORY_ENTRIES__
 )
 
-decode_post_cmd() {
+decode_b64_str() {
   local b64="${1:-}"
   if [[ -n "$b64" ]]; then
     printf '%s' "$b64" | base64 -d 2>/dev/null || printf '%s' "$b64"
+  fi
+}
+
+decode_post_cmd() {
+  decode_b64_str "${1:-}"
+}
+
+build_repo_filter_args() {
+  local inc_b64="${1:-}"
+  local exc_b64="${2:-}"
+  REPO_FILTER_ARGS=()
+  if [[ -n "$inc_b64" ]]; then
+    while IFS= read -r pat; do
+      [[ -n "$pat" ]] && REPO_FILTER_ARGS+=("--include=${pat}")
+    done < <(decode_b64_str "$inc_b64"; echo)
+  fi
+  REPO_FILTER_ARGS+=("${EXCLUDE_ARGS[@]}")
+  if [[ -n "$exc_b64" ]]; then
+    while IFS= read -r pat; do
+      [[ -n "$pat" ]] && REPO_FILTER_ARGS+=("--exclude=${pat}")
+    done < <(decode_b64_str "$exc_b64"; echo)
   fi
 }
 
@@ -230,7 +290,7 @@ Syncs application repositories to $VM_HOST and optionally executes post-deploy h
 
 Configured Repositories:
 $(for entry in "${REPOSITORIES[@]}"; do
-  IFS='|' read -r rname lpath rpath post_b64 int_port ext_port <<< "$entry"
+  IFS='|' read -r rname lpath rpath post_b64 int_port ext_port inc_b64 exc_b64 <<< "$entry"
   post_cmd="$(decode_post_cmd "${post_b64:-}")"
   int_port="${int_port:-3000}"
   ext_port="${ext_port:-3001}"
@@ -304,7 +364,7 @@ if [[ "$DRY_RUN" == "true" || "$OFFLINE_ONLY" == "true" ]]; then
   echo " Target VM: $VM_HOST"
   echo "============================================================"
   for entry in "${REPOSITORIES[@]}"; do
-    IFS='|' read -r rname lpath rpath post_b64 int_port ext_port <<< "$entry"
+    IFS='|' read -r rname lpath rpath post_b64 int_port ext_port inc_b64 exc_b64 <<< "$entry"
     post_cmd="$(decode_post_cmd "${post_b64:-}")"
     if [[ -n "$TARGET_REPO" && "$rname" != "$TARGET_REPO" ]]; then
       continue
@@ -314,7 +374,8 @@ if [[ "$DRY_RUN" == "true" || "$OFFLINE_ONLY" == "true" ]]; then
       echo "    [-] WARNING: Local directory does not exist: $lpath"
       continue
     fi
-    rsync -r --list-only "${EXCLUDE_ARGS[@]}" "$lpath/" | awk -v name="$rname" 'NR>1 {
+    build_repo_filter_args "${inc_b64:-}" "${exc_b64:-}"
+    rsync -r --list-only "${REPO_FILTER_ARGS[@]}" "$lpath/" | awk -v name="$rname" 'NR>1 {
       path = $5;
       for (i=6; i<=NF; i++) path = path " " $i;
       printf "  %-11s %10s  %s\\n", $1, $2, path;
@@ -396,7 +457,7 @@ fi
 
 # Synchronize each repository
 for entry in "${REPOSITORIES[@]}"; do
-  IFS='|' read -r rname lpath rpath post_b64 int_port ext_port <<< "$entry"
+  IFS='|' read -r rname lpath rpath post_b64 int_port ext_port inc_b64 exc_b64 <<< "$entry"
   post_cmd="$(decode_post_cmd "${post_b64:-}")"
   int_port="${int_port:-3000}"
   ext_port="${ext_port:-3001}"
@@ -420,9 +481,10 @@ for entry in "${REPOSITORIES[@]}"; do
     ssh -q "$VM_HOST" "mkdir -p $remote_dir"
   fi
 
-  # Synchronize with optimized exclusions
+  # Synchronize with optimized exclusions and per-repo include/exclude overrides
+  build_repo_filter_args "${inc_b64:-}" "${exc_b64:-}"
   rsync "${RSYNC_OPTS[@]}" \\
-    "${EXCLUDE_ARGS[@]}" \\
+    "${REPO_FILTER_ARGS[@]}" \\
     "$lpath/" "$VM_HOST:$rpath"
 
   # Post-deploy lifecycle execution (if configured)

@@ -25,6 +25,7 @@ from airlock.executor import exec_in_vm
 from airlock.health import verify_route_health
 from airlock.inventory import (
     find_vm_yaml,
+    find_vmhost_yaml,
     format_config_path,
     get_inventory_search_dirs,
     get_primary_inventory_dir,
@@ -488,15 +489,16 @@ def airlock_create_vm(
     internal_port: int = 0,
     external_port: int = 0,
     post_deploy: str = "",
-    vcpu: int = 4,
+    vcpu: int = 2,
     memory_mib: int = 2048,
-    disk_gib: int = 50,
+    disk_gib: int = 20,
 ) -> dict[str, Any]:
     """Generates a new dedicated execution virtual machine specification and runbook in inventory/{vmhost}/{vm}/.
 
     Automates:
     - Tech stack and port inference from local repository manifests.
     - Optimal hypervisor host selection if unspecified.
+    - Safe vCPU capping against host capacity (defaults to 2 vCPUs, never saturating 100% of host cores).
     - Static DHCP IP and unique MAC reservation on virbr0.
     - Conflict-free hypervisor proxy port allocation.
     - inventory/{vmhost}/{vm}/vm.yaml generation (Single Source of Truth).
@@ -511,9 +513,9 @@ def airlock_create_vm(
         internal_port: Application internal listening port. Inferred if 0.
         external_port: Hypervisor proxy forwarding port. Auto-allocated if 0.
         post_deploy: Post-deploy startup command. Inferred if omitted.
-        vcpu: Number of virtual CPUs to allocate (default 4).
+        vcpu: Number of virtual CPUs to allocate (default 2, capped safely by host capacity).
         memory_mib: RAM allocation in MiB (default 2048).
-        disk_gib: Virtual disk storage in GiB (default 50).
+        disk_gib: Virtual disk storage in GiB (default 20).
     """
     resolved_path = Path(local_path).expanduser().resolve()
     if not resolved_path.exists():
@@ -547,6 +549,21 @@ def airlock_create_vm(
         else:
             hosts = list_inventory_hosts()
             vmhost = hosts[0] if hosts else "remotehost"
+
+    warnings: list[str] = []
+
+    # Cap vCPU safely below 100% of host capacity when host inventory is available
+    _, host_doc = find_vmhost_yaml(vmhost)
+    if host_doc:
+        host_cores = int(
+            (host_doc.get("vmhost", {}).get("hardware", {}).get("cpu", {}) or {}).get("total_cores", 0) or 0
+        )
+        if host_cores > 0 and vcpu >= host_cores:
+            capped_vcpu = max(1, host_cores // 2)
+            warnings.append(
+                f"Requested vcpu={vcpu} would saturate host '{vmhost}' ({host_cores} cores); capped to {capped_vcpu} vCPU(s)."
+            )
+            vcpu = capped_vcpu
 
     # Allocate collision-free network IP & MAC
     net_alloc = allocate_vm_network(vmhost=vmhost)
@@ -685,7 +702,6 @@ def airlock_create_vm(
     sync_cmd = [str(PYTHON_BIN), str(GENERATE_SYNC_SCRIPT)]
     sync_res = _run_command(sync_cmd)
 
-    warnings: list[str] = []
     if not conf_res.get("success"):
         warnings.append(f"Runbook generation failed: {conf_res.get('stderr') or conf_res.get('stdout')}")
     if not sync_res.get("success"):
@@ -723,12 +739,14 @@ def airlock_update_vm(
     internal_port: int = 0,
     external_port: int = 0,
     post_deploy: str | None = None,
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
     app_name: str = "",
 ) -> dict[str, Any]:
     """Updates an existing VM specification in inventory/{vmhost}/{vm}/vm.yaml, re-renders VM.md, and regenerates sync scripts.
 
-    Allows modifying resources (vCPU, RAM, disk size), ports, or post-deploy commands before deployment
-    (or before re-provisioning) without hand-editing vm.yaml or VM.md.
+    Allows modifying resources (vCPU, RAM, disk size), ports, post-deploy commands, or per-repo rsync
+    include/exclude rules before deployment (or before re-provisioning) without hand-editing vm.yaml or VM.md.
 
     Args:
         vm_name: Target VM domain name in inventory.
@@ -738,6 +756,8 @@ def airlock_update_vm(
         internal_port: New internal application port (>0 to update).
         external_port: New hypervisor proxy port (>0 to update; automatically updates proxy_socket_service).
         post_deploy: New post-deploy command for the repository (pass "" to clear; omit/None to leave unchanged).
+        include: Optional per-repo rsync include patterns (e.g. ["docs/templates/"]).
+        exclude: Optional per-repo rsync exclude patterns (e.g. ["data/raw/"]).
         app_name: Optional repository name when targeting a specific app on a multi-app VM.
     """
     yaml_path, doc = _find_vm_yaml(vm_name)
@@ -805,6 +825,28 @@ def airlock_update_vm(
             changes["post_deploy"] = {"old": target_repo.get("post_deploy", ""), "new": post_deploy}
             target_repo["post_deploy"] = post_deploy
 
+    if include is not None:
+        if target_repo is None:
+            return {"success": False, "error": f"VM '{vm_name}' has no repositories configured to update include rules."}
+        clean_inc = [str(p).strip() for p in include if str(p).strip()]
+        if target_repo.get("include", []) != clean_inc:
+            changes["include"] = {"old": target_repo.get("include", []), "new": clean_inc}
+            if clean_inc:
+                target_repo["include"] = clean_inc
+            else:
+                target_repo.pop("include", None)
+
+    if exclude is not None:
+        if target_repo is None:
+            return {"success": False, "error": f"VM '{vm_name}' has no repositories configured to update exclude rules."}
+        clean_exc = [str(p).strip() for p in exclude if str(p).strip()]
+        if target_repo.get("exclude", []) != clean_exc:
+            changes["exclude"] = {"old": target_repo.get("exclude", []), "new": clean_exc}
+            if clean_exc:
+                target_repo["exclude"] = clean_exc
+            else:
+                target_repo.pop("exclude", None)
+
     if not changes:
         return {
             "success": True,
@@ -825,7 +867,7 @@ def airlock_update_vm(
     final_vcpu = int(resources.get("vcpu", 4))
     final_ram_mib = int(resources.get("memory_mib", 2048))
     final_ram_gb = max(1, final_ram_mib // 1024)
-    final_disk_gib = int(bp.get("disk_size_gib", 50))
+    final_disk_gib = int(bp.get("disk_size_gib", 20))
     final_int_port = int(bp.get("app_internal_port", 3000))
     final_ext_port = int(bp.get("proxy_external_port", 3001))
     final_proxy_svc = str(bp.get("proxy_socket_service", f"/etc/systemd/system/{vm_name}-p{final_ext_port}-proxy.socket"))

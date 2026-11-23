@@ -935,6 +935,144 @@ class TestMitigationsUnit(unittest.TestCase):
                 else:
                     os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
 
+    def test_defaults_disk_20gib_vcpu_2_and_host_cap(self):
+        from airlock.mcp.server import airlock_create_vm
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            inv_dir = root / "inventory"
+            host_dir = inv_dir / "localhost"
+            host_dir.mkdir(parents=True)
+            (host_dir / "vmhost.yaml").write_text(
+                yaml.safe_dump({
+                    "vmhost": {
+                        "name": "localhost",
+                        "connection": {"host": "localhost"},
+                        "system": {"os": {"pretty_name": "Ubuntu 24.04 LTS"}},
+                        "hardware": {
+                            "cpu": {"total_cores": 4, "model": "QuadCore"},
+                            "memory": {"total_mib": 16384, "total_gb": 16},
+                        },
+                        "virtualization": {
+                            "networks": [{"name": "default", "bridge": "virbr0", "ip": "192.168.122.1", "netmask": "255.255.255.0"}]
+                        },
+                    }
+                }),
+                encoding="utf-8",
+            )
+            app_dir = root / "tiny-app"
+            app_dir.mkdir()
+            (app_dir / "pyproject.toml").write_text('[project]\nname = "tiny-app"\n', encoding="utf-8")
+
+            old_env = os.environ.get("AIRLOCK_INVENTORY_DIR")
+            os.environ["AIRLOCK_INVENTORY_DIR"] = str(inv_dir)
+            try:
+                with patch("airlock.ports.get_inventory_used_ports", return_value=set()), \
+                     patch("airlock.ports.get_hypervisor_live_ports", return_value=set()):
+                    # Default call uses 2 vCPU and 20 GiB disk
+                    res_def = airlock_create_vm(local_path=str(app_dir), vmhost="localhost", vm_name="tiny-default-vm")
+                    # Explicit vcpu=4 on a 4-core host is capped to 2 vCPUs with a warning
+                    res_cap = airlock_create_vm(local_path=str(app_dir), vmhost="localhost", vm_name="tiny-capped-vm", vcpu=4)
+            finally:
+                if old_env is not None:
+                    os.environ["AIRLOCK_INVENTORY_DIR"] = old_env
+                else:
+                    os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
+
+            self.assertTrue(res_def["success"])
+            def_doc = yaml.safe_load((host_dir / "tiny-default-vm" / "vm.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(def_doc["vm"]["resources"]["vcpu"], 2)
+            self.assertEqual(def_doc["vm"]["blueprint"]["disk_size_gib"], 20)
+
+            self.assertTrue(res_cap["success"])
+            cap_doc = yaml.safe_load((host_dir / "tiny-capped-vm" / "vm.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(cap_doc["vm"]["resources"]["vcpu"], 2)
+            self.assertTrue(any("capped to 2 vCPU" in w for w in res_cap.get("warnings", [])))
+
+    def test_detector_python_uv_and_no_phantom_main_py(self):
+        from airlock.detector import detect_application
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            # 1. uv project with pyproject.toml + uv.lock + .python-version, NO main.py
+            uv_pkg = root / "uv-lib"
+            uv_pkg.mkdir()
+            (uv_pkg / "pyproject.toml").write_text('[project]\nname = "uv-lib"\ndependencies = ["httpx"]\n', encoding="utf-8")
+            (uv_pkg / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+            (uv_pkg / ".python-version").write_text("3.14\n", encoding="utf-8")
+
+            prof1 = detect_application(uv_pkg)
+            self.assertTrue(prof1["success"])
+            self.assertEqual(prof1["app_name"], "uv-lib")
+            self.assertEqual(prof1["framework"], "Python (uv)")
+            self.assertEqual(prof1["package_manager"], "uv")
+            self.assertEqual(prof1["python_version"], "3.14")
+            self.assertEqual(prof1["post_deploy"], "")
+
+            # 2. uv FastAPI project WITH actual main.py entrypoint
+            uv_api = root / "uv-api"
+            uv_api.mkdir()
+            (uv_api / "pyproject.toml").write_text('[project]\nname = "uv-api"\ndependencies = ["fastapi", "uvicorn"]\n', encoding="utf-8")
+            (uv_api / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+            (uv_api / "main.py").write_text("app = object()\n", encoding="utf-8")
+
+            prof2 = detect_application(uv_api)
+            self.assertEqual(prof2["framework"], "Python (uv, FastAPI/Uvicorn)")
+            self.assertEqual(prof2["post_deploy"], "uv run uvicorn main:app --host 0.0.0.0 --port 8000")
+
+    def test_per_repo_include_exclude_sync_rules_preserved_and_applied(self):
+        import subprocess
+
+        sync_mod = _load_module(
+            "generate_sync_rules_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_rsync" / "scripts" / "generate_sync.py",
+        )
+        add_mod = _load_module(
+            "add_vmhost_rules_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_inventory" / "scripts" / "add_vmhost.py",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            app_dir = root / "my-app"
+            (app_dir / "docs" / "templates").mkdir(parents=True)
+            (app_dir / "data" / "raw").mkdir(parents=True)
+            (app_dir / "docs" / "templates" / "report.md").write_text("# Template\n", encoding="utf-8")
+            (app_dir / "docs" / "README.md").write_text("# Ignored doc\n", encoding="utf-8")
+            (app_dir / "data" / "raw" / "big.csv").write_text("a,b\n", encoding="utf-8")
+            (app_dir / "app.py").write_text("print('hi')\n", encoding="utf-8")
+
+            repos = [{
+                "name": "my-app",
+                "local_path": str(app_dir),
+                "remote_path": "~/my-app/",
+                "internal_port": 8000,
+                "external_port": 8001,
+                "post_deploy": "",
+                "include": ["docs/templates/"],
+                "exclude": ["data/raw/"],
+            }]
+
+            # 1. Verify add_vmhost preserves include/exclude in rendered YAML
+            rendered_yaml = add_mod.render_repositories_yaml({"name": "demo-vm"}, {"repositories": repos})
+            parsed = yaml.safe_load("repositories:\n" + rendered_yaml)
+            self.assertEqual(parsed["repositories"][0]["include"], ["docs/templates/"])
+            self.assertEqual(parsed["repositories"][0]["exclude"], ["data/raw/"])
+
+            # 2. Verify generated script --offline actually includes docs/templates/report.md
+            #    while excluding docs/README.md and data/raw/big.csv
+            exclusions = sync_mod.evaluate_project_exclusions()
+            script_path = root / "deploy_app_to_airlock.sh"
+            script_path.write_text(sync_mod.generate_shell_script("demo-vm", repos, exclusions), encoding="utf-8")
+            script_path.chmod(0o755)
+
+            proc = subprocess.run([str(script_path), "--offline"], capture_output=True, text=True, check=False)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("docs/templates/report.md", proc.stdout)
+            self.assertIn("app.py", proc.stdout)
+            self.assertNotIn("docs/README.md", proc.stdout)
+            self.assertNotIn("data/raw/big.csv", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
