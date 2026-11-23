@@ -1220,6 +1220,86 @@ class TestMitigationsUnit(unittest.TestCase):
         self.assertIn("--delete", called_cmd)
         self.assertIn("--dry-run", called_cmd)
 
+    def test_dispatcher_resolves_vm_dynamically_from_cwd_and_refuses_default(self):
+        import subprocess
+
+        sync_mod = _load_module(
+            "generate_sync_dispatcher_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_rsync" / "scripts" / "generate_sync.py",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            inv_dir = root / "inventory"
+            proj_a = root / "project-a"
+            proj_a_sub = proj_a / "src"
+            proj_a_sub.mkdir(parents=True)
+            unregistered = root / "unregistered-project"
+            unregistered.mkdir()
+
+            vm_a_dir = inv_dir / "localhost" / "project-a-vm"
+            vm_a_dir.mkdir(parents=True)
+            (vm_a_dir / "vm.yaml").write_text(
+                yaml.safe_dump({
+                    "vm": {
+                        "name": "project-a-vm",
+                        "host": "localhost",
+                        "blueprint": {
+                            "repositories": [{
+                                "name": "project-a",
+                                "local_path": str(proj_a),
+                                "remote_path": "~/project-a/",
+                            }]
+                        },
+                    }
+                }),
+                encoding="utf-8",
+            )
+            vm_a_script = vm_a_dir / "deploy_app_to_airlock.sh"
+            vm_a_script.write_text('#!/usr/bin/env bash\necho "DISPATCHED_TO=project-a-vm ARGS=$*"\n', encoding="utf-8")
+            vm_a_script.chmod(0o755)
+
+            dispatcher = root / "deploy_app_to_airlock.sh"
+            disp_content = sync_mod.generate_dispatcher_script()
+            self.assertNotIn("DEFAULT_VM=", disp_content)
+            dispatcher.write_text(disp_content, encoding="utf-8")
+            dispatcher.chmod(0o755)
+
+            env = {**os.environ, "AIRLOCK_INVENTORY_DIR": str(inv_dir), "HOME": str(root / "empty_home")}
+
+            # 1. Running from project-a (or subdirectory) resolves project-a-vm automatically
+            p1 = subprocess.run([str(dispatcher), "--offline"], cwd=str(proj_a_sub), env=env, capture_output=True, text=True)
+            self.assertEqual(p1.returncode, 0, p1.stderr)
+            self.assertIn("DISPATCHED_TO=project-a-vm ARGS=--offline", p1.stdout)
+
+            # 2. Running from an unregistered directory refuses to fall back to any default VM
+            p2 = subprocess.run([str(dispatcher), "--offline"], cwd=str(unregistered), env=env, capture_output=True, text=True)
+            self.assertNotEqual(p2.returncode, 0)
+            self.assertIn("Refusing to deploy to an arbitrary default VM", p2.stderr)
+
+            # 3. Ambiguous match (two VMs pointing to same project-a) fails fast with clear error
+            vm_b_dir = inv_dir / "localhost" / "project-a-alt-vm"
+            vm_b_dir.mkdir(parents=True)
+            (vm_b_dir / "vm.yaml").write_text(
+                yaml.safe_dump({
+                    "vm": {
+                        "name": "project-a-alt-vm",
+                        "host": "localhost",
+                        "blueprint": {
+                            "repositories": [{
+                                "name": "project-a",
+                                "local_path": str(proj_a),
+                                "remote_path": "~/project-a/",
+                            }]
+                        },
+                    }
+                }),
+                encoding="utf-8",
+            )
+            p3 = subprocess.run([str(dispatcher), "--offline"], cwd=str(proj_a), env=env, capture_output=True, text=True)
+            self.assertNotEqual(p3.returncode, 0)
+            self.assertIn("Multiple VMs match current directory", p3.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
