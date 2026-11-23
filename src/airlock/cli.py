@@ -187,7 +187,15 @@ def cmd_drift(args: argparse.Namespace) -> int:
 
 def cmd_snapshot(args: argparse.Namespace) -> int:
     action = "revert" if args.action == "rollback" else args.action
-    res = airlock_snapshot(args.vm_name, action=action, snapshot_name=args.snapshot_name or "")
+    kwargs: dict = {
+        "action": action,
+        "snapshot_name": args.snapshot_name or "",
+    }
+    if getattr(args, "force", False):
+        kwargs["force"] = True
+    if getattr(args, "dry_run", False):
+        kwargs["dry_run"] = True
+    res = airlock_snapshot(args.vm_name, **kwargs)
     if not res.get("success"):
         print(f"Error executing snapshot '{action}' on '{args.vm_name}': {res.get('error') or res.get('stderr', 'unknown error')}", file=sys.stderr)
         return 1
@@ -370,10 +378,12 @@ def main(argv: list[str] | None = None) -> int:
     p_drift.add_argument("vm_name", help="Domain name of target VM")
 
     # snapshot
-    p_snap = subparsers.add_parser("snapshot", help="Create, revert, or list VM disk snapshots")
+    p_snap = subparsers.add_parser("snapshot", help="Create, revert, list, or delete VM disk snapshots")
     p_snap.add_argument("vm_name", help="Domain name of target VM")
-    p_snap.add_argument("action", choices=["create", "revert", "rollback", "list"], help="Snapshot action")
-    p_snap.add_argument("snapshot_name", nargs="?", default="", help="Optional snapshot name")
+    p_snap.add_argument("action", choices=["create", "revert", "rollback", "list", "delete"], help="Snapshot action")
+    p_snap.add_argument("snapshot_name", nargs="?", default="", help="Snapshot name (required for 'delete')")
+    p_snap.add_argument("--force", action="store_true", help="Allow deleting the protected baseline snapshot")
+    p_snap.add_argument("--dry-run", action="store_true", help="Preview snapshot action without modifying hypervisor")
 
     # audit-security
     p_sec = subparsers.add_parser("audit-security", help="Audit VM credential isolation and workstation zero-workload invariant")

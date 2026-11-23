@@ -1357,6 +1357,140 @@ class TestMitigationsUnit(unittest.TestCase):
             self.assertNotIn(".agents/skills/bar/SKILL.md", proc.stdout)
             self.assertNotIn(".agents/notes.txt", proc.stdout)
 
+    def test_snapshot_delete_gates_native_fallback_vm_yaml_sync_mcp_and_cli(self):
+        import json
+        from airlock.mcp.server import airlock_snapshot
+
+        deploy_mod = _load_module(
+            "deploy_vm_snap_del_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py",
+        )
+
+        params = {
+            "VM_NAME": "snap-vm",
+            "SNAPSHOT_BASE_NAME": "snapshot-base-clean",
+        }
+
+        # 1. Empty or 'default' snapshot_name rejected
+        self.assertEqual(deploy_mod.execute_snapshot_delete(params, "localhost", ""), 1)
+        self.assertEqual(deploy_mod.execute_snapshot_delete(params, "localhost", "default"), 1)
+
+        # 2. Baseline snapshot protected unless force=True
+        self.assertEqual(deploy_mod.execute_snapshot_delete(params, "localhost", "snapshot-base-clean", force=False), 1)
+
+        # 3. Nonexistent snapshot rejected
+        with patch.object(deploy_mod, "run_cmd_status", return_value=(0, "snapshot-base-clean\nsnap-1\n", "")):
+            self.assertEqual(deploy_mod.execute_snapshot_delete(params, "localhost", "snap-missing"), 1)
+
+        # 4. Native delete path: deletes snap-1, removes unreferenced overlay, updates vm.yaml, emits JSON
+        with tempfile.TemporaryDirectory() as tmpdir:
+            vm_yaml = Path(tmpdir) / "vm.yaml"
+            vm_yaml.write_text(
+                yaml.safe_dump({
+                    "vm": {
+                        "name": "snap-vm",
+                        "host": "localhost",
+                        "disks": [
+                            {"device": "disk", "target": "vda", "bus": "virtio", "format": "qcow2", "source": "/var/lib/libvirt/images/snap-vm.snap-2"},
+                        ],
+                    }
+                }),
+                encoding="utf-8",
+            )
+            snap_xml = (
+                "<domainsnapshot><disks>"
+                "<disk name='vda' snapshot='external'><source file='/var/lib/libvirt/images/snap-vm.snap-1'/></disk>"
+                "</disks></domainsnapshot>"
+            )
+            list_calls = {"n": 0}
+
+            def fake_native_run(cmd, host=None):
+                if cmd[:4] == ["sudo", "virsh", "snapshot-list", "snap-vm"]:
+                    list_calls["n"] += 1
+                    if list_calls["n"] == 1:
+                        return 0, "snapshot-base-clean\nsnap-1\nsnap-2\n", ""
+                    return 0, "snapshot-base-clean\nsnap-2\n", ""
+                if cmd[:4] == ["sudo", "virsh", "snapshot-dumpxml", "snap-vm"]:
+                    if cmd[4] == "snap-1":
+                        return 0, snap_xml, ""
+                    return 0, "<domainsnapshot><disks/></domainsnapshot>", ""
+                if cmd[:3] == ["sudo", "virsh", "snapshot-delete"]:
+                    return 0, "Domain snapshot snap-1 deleted", ""
+                if cmd[:3] == ["sudo", "virsh", "domblklist"]:
+                    return 0, " Type Device Target Source\n-----\n file disk vda /var/lib/libvirt/images/snap-vm.snapshot-base-clean\n", ""
+                if cmd[:3] == ["sudo", "qemu-img", "info"]:
+                    return 0, "image: /var/lib/libvirt/images/snap-vm.snapshot-base-clean\nbacking file: /var/lib/libvirt/images/snap-vm.qcow2\n", ""
+                if cmd[:3] == ["sudo", "bash", "-c"]:
+                    return 0, "REMOVED", ""
+                return 0, "", ""
+
+            buf = io.StringIO()
+            with patch.object(deploy_mod, "run_cmd_status", side_effect=fake_native_run), redirect_stdout(buf):
+                rc = deploy_mod.execute_snapshot_delete(params, "localhost", "snap-1", config_path=vm_yaml)
+            self.assertEqual(rc, 0)
+            out_text = buf.getvalue()
+            marker = "AIRLOCK_SNAPSHOT_DELETE_JSON:"
+            json_line = next(ln for ln in out_text.splitlines() if ln.startswith(marker))
+            payload = json.loads(json_line[len(marker):])
+            self.assertEqual(payload["deleted_snapshot"], "snap-1")
+            self.assertEqual(payload["remaining_snapshots"], ["snapshot-base-clean", "snap-2"])
+            self.assertEqual(payload["removed_overlays"], ["/var/lib/libvirt/images/snap-vm.snap-1"])
+            self.assertTrue(payload["vm_yaml_updated"])
+            reloaded = yaml.safe_load(vm_yaml.read_text(encoding="utf-8"))
+            self.assertEqual(reloaded["vm"]["disks"][0]["source"], "/var/lib/libvirt/images/snap-vm.snapshot-base-clean")
+
+        # 5. Fallback path on older libvirt (native returns unsupported -> blockcommit + --metadata)
+        fb_cmds: list[list[str]] = []
+        fb_list = {"n": 0}
+
+        def fake_fallback_run(cmd, host=None):
+            fb_cmds.append(list(cmd))
+            if cmd[:4] == ["sudo", "virsh", "snapshot-list", "snap-vm"]:
+                fb_list["n"] += 1
+                return (0, "snapshot-base-clean\nsnap-2\n", "") if fb_list["n"] == 1 else (0, "snapshot-base-clean\n", "")
+            if cmd[:4] == ["sudo", "virsh", "snapshot-dumpxml", "snap-vm"]:
+                if cmd[4] == "snap-2":
+                    return 0, "<domainsnapshot><disks><disk name='vda'><source file='/var/lib/libvirt/images/snap-vm.snap-2'/></disk></disks></domainsnapshot>", ""
+                return 0, "<domainsnapshot><disks/></domainsnapshot>", ""
+            if cmd[:3] == ["sudo", "virsh", "snapshot-delete"] and "--metadata" not in cmd:
+                return 1, "", "error: unsupported configuration: deletion of external disk snapshots not supported"
+            if cmd[:3] == ["sudo", "virsh", "dominfo"]:
+                return 0, "State:          running\n", ""
+            if cmd[:3] == ["sudo", "virsh", "domblklist"]:
+                return 0, " Type Device Target Source\n-----\n file disk vda /var/lib/libvirt/images/snap-vm.snap-2\n", ""
+            if cmd[:3] == ["sudo", "virsh", "blockcommit"]:
+                return 0, "Successfully pivoted", ""
+            if cmd[:3] == ["sudo", "qemu-img", "info"]:
+                return 0, "image: /var/lib/libvirt/images/snap-vm.snapshot-base-clean\n", ""
+            return 0, "", ""
+
+        with patch.object(deploy_mod, "run_cmd_status", side_effect=fake_fallback_run), redirect_stdout(io.StringIO()):
+            rc_fb = deploy_mod.execute_snapshot_delete(params, "localhost", "snap-2")
+        self.assertEqual(rc_fb, 0)
+        self.assertTrue(any(c[:3] == ["sudo", "virsh", "blockcommit"] for c in fb_cmds))
+        self.assertTrue(any("--metadata" in c for c in fb_cmds))
+
+        # 6. MCP airlock_snapshot(action="delete") rejects empty name and parses structured output
+        bad_mcp = airlock_snapshot("snap-vm", action="delete", snapshot_name="")
+        self.assertFalse(bad_mcp["success"])
+        mock_stdout = 'AIRLOCK_SNAPSHOT_DELETE_JSON:{"deleted_snapshot": "snap-1", "remaining_snapshots": ["snapshot-base-clean"], "active_disks": [], "removed_overlays": [], "vm_yaml_updated": true, "dry_run": false}'
+        with patch("airlock.mcp.server._run_command", return_value={"success": True, "returncode": 0, "stdout": mock_stdout, "stderr": ""}) as mock_run:
+            mcp_res = airlock_snapshot("snap-vm", action="delete", snapshot_name="snap-1", force=True, dry_run=True)
+        self.assertTrue(mcp_res["success"])
+        self.assertEqual(mcp_res["deleted_snapshot"], "snap-1")
+        self.assertEqual(mcp_res["remaining_snapshots"], ["snapshot-base-clean"])
+        called = mock_run.call_args[0][0]
+        self.assertIn("--delete-snapshot", called)
+        self.assertIn("--force", called)
+        self.assertIn("--dry-run", called)
+
+        # 7. CLI `airlock snapshot <vm> delete <snap> --force --dry-run`
+        with patch("airlock.cli.airlock_snapshot", return_value={"success": True, "stdout": "deleted"}) as mock_cli_snap, \
+             redirect_stdout(io.StringIO()):
+            rc_cli = cli.main(["snapshot", "snap-vm", "delete", "snap-1", "--force", "--dry-run"])
+        self.assertEqual(rc_cli, 0)
+        mock_cli_snap.assert_called_once_with("snap-vm", action="delete", snapshot_name="snap-1", force=True, dry_run=True)
+
 
 if __name__ == "__main__":
     unittest.main()

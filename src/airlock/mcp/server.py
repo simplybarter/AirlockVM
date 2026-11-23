@@ -1190,33 +1190,87 @@ def airlock_purge_vm(
 
 
 @server.tool()
-def airlock_snapshot(vm_name: str, action: str, snapshot_name: str = "") -> dict[str, Any]:
-    """Manages disk-only snapshots for instant clean-slate rollbacks.
+def airlock_snapshot(
+    vm_name: str,
+    action: str,
+    snapshot_name: str = "",
+    force: bool = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Manages disk-only snapshots for instant clean-slate rollbacks and safe backing-chain pruning.
 
     Args:
         vm_name: Target VM domain name.
-        action: Snapshot action ('create', 'revert', 'list').
-        snapshot_name: Name of the snapshot (optional for revert/create; defaults to baseline).
+        action: Snapshot action ('create', 'revert', 'list', 'delete').
+        snapshot_name: Name of the snapshot (required for 'delete'; optional for 'create'/'revert', defaulting to baseline).
+        force: When True with action='delete', permits deleting the protected baseline snapshot (e.g. snapshot-base-clean).
+        dry_run: When True, previews the snapshot operation without modifying the hypervisor.
     """
+    try:
+        safe_vm = validate_identifier(vm_name, "VM name")
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+
     if action == "create":
-        cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", vm_name, "--snapshot"]
+        cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", safe_vm, "--snapshot"]
         if snapshot_name:
-            cmd.append(snapshot_name)
+            try:
+                cmd.append(validate_identifier(snapshot_name, "snapshot name"))
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
+        if dry_run:
+            cmd.append("--dry-run")
     elif action == "revert":
-        cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", vm_name, "--rollback"]
+        cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", safe_vm, "--rollback"]
         if snapshot_name:
-            cmd.append(snapshot_name)
+            try:
+                cmd.append(validate_identifier(snapshot_name, "snapshot name"))
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
+        if dry_run:
+            cmd.append("--dry-run")
     elif action == "list":
-        cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", vm_name, "--status"]
+        cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", safe_vm, "--status"]
+    elif action == "delete":
+        if not snapshot_name or not snapshot_name.strip():
+            return {
+                "success": False,
+                "vm_name": safe_vm,
+                "action": action,
+                "error": "Explicit non-empty 'snapshot_name' is required for action='delete'.",
+            }
+        try:
+            safe_snap = validate_identifier(snapshot_name, "snapshot name")
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+        cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", safe_vm, "--delete-snapshot", safe_snap]
+        if force:
+            cmd.append("--force")
+        if dry_run:
+            cmd.append("--dry-run")
     else:
         return {
             "success": False,
-            "error": f"Invalid action '{action}'. Must be 'create', 'revert', or 'list'.",
+            "error": f"Invalid action '{action}'. Must be 'create', 'revert', 'list', or 'delete'.",
         }
 
-    res = _run_command(cmd, timeout=60)
-    res["vm_name"] = vm_name
+    res = _run_command(cmd, timeout=180 if action == "delete" else 60)
+    res["vm_name"] = safe_vm
     res["action"] = action
+
+    # Parse structured snapshot-delete metadata if present
+    if action == "delete" and res.get("stdout"):
+        import json as _json
+        marker = "AIRLOCK_SNAPSHOT_DELETE_JSON:"
+        for line in res["stdout"].splitlines():
+            if line.startswith(marker):
+                try:
+                    meta = _json.loads(line[len(marker):])
+                    res.update(meta)
+                except Exception:
+                    pass
+                break
+
     return res
 
 

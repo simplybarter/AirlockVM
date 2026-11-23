@@ -97,7 +97,7 @@ The MCP server exposes standard, declarative tools enabling agents to inspect, d
 | `airlock_power` | `vm_name: str`<br/>`action: "start" \| "stop" \| "reboot" \| "destroy"` | Issues power state transitions via libvirt (`virsh start`, `virsh shutdown`, `virsh reboot`, `virsh destroy`). |
 | `airlock_purge_vm` | `vm_name: str`<br/>`dry_run: bool = False`<br/>`purge_ssh_keys: bool = False` | Permanently removes a VM domain, NVRAM, disk/snapshot images, libvirt static DHCP reservation, proxy sockets, `~/.ssh/config` host block, and inventory record (regenerating the sync dispatcher). |
 | `airlock_checkpoint` | `vm_name: str`<br/>`action: "create" \| "revert"`<br/>`snapshot_name: str = ""` | Creates automated pre-deployment disk snapshot checkpoints or reverts back to a clean state if experimental workloads crash. |
-| `airlock_snapshot` | `vm_name: str`<br/>`action: "create" \| "revert" \| "list"`<br/>`snapshot_name: str = ""` | Manages disk-only snapshots (`virsh snapshot-create-as` / `virsh snapshot-revert`), enabling rapid clean-state rollbacks after running experimental workloads. |
+| `airlock_snapshot` | `vm_name: str`<br/>`action: "create" \| "revert" \| "list" \| "delete"`<br/>`snapshot_name: str = ""`<br/>`force: bool = False`<br/>`dry_run: bool = False` | Manages external disk-only snapshots (`create`, `revert`, `list`, and safe `delete` with baseline protection, backing-chain merging/pivoting, orphaned overlay cleanup, and `vm.yaml` disk-source sync). |
 
 ### 3.4. Provisioning & Workload Deployment
 

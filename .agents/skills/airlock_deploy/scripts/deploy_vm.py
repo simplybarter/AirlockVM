@@ -1017,6 +1017,246 @@ def execute_rollback(params: dict, host: str, snapshot_name: str = "default", dr
     return 0
 
 
+def _parse_snapshot_overlay_paths(snap_xml: str) -> list[tuple[str, str]]:
+    """Extracts (target_dev, file_path) pairs from `virsh snapshot-dumpxml` output."""
+    pairs: list[tuple[str, str]] = []
+    if not snap_xml:
+        return pairs
+    try:
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(snap_xml)
+        for disk in root.findall("./disks/disk"):
+            target = disk.attrib.get("name", "").strip()
+            src = disk.find("source")
+            fpath = src.attrib.get("file", "").strip() if src is not None else ""
+            if target and fpath:
+                pairs.append((target, fpath))
+    except Exception:
+        pass
+    return pairs
+
+
+def _list_active_disks(vm_name: str, host: str) -> list[dict[str, str]]:
+    """Returns active block device paths as [{'target': 'vda', 'source': '/path/...'}]."""
+    rc, out, _ = run_cmd_status(["sudo", "virsh", "domblklist", vm_name, "--details"], host=host)
+    disks: list[dict[str, str]] = []
+    if rc != 0 or not out:
+        return disks
+    for line in out.splitlines()[2:]:
+        parts = line.split()
+        if len(parts) >= 4 and parts[3].startswith("/"):
+            disks.append({"target": parts[2], "source": parts[3]})
+    return disks
+
+
+def _collect_backing_chain_paths(active_disks: list[dict[str, str]], host: str) -> set[str]:
+    """Collects every file referenced in the active qcow2 backing chains on the hypervisor."""
+    referenced: set[str] = set()
+    for d in active_disks:
+        src = d.get("source", "")
+        if not src:
+            continue
+        referenced.add(src)
+        rc, out, _ = run_cmd_status(["sudo", "qemu-img", "info", "--backing-chain", src], host=host)
+        if rc == 0 and out:
+            for line in out.splitlines():
+                if line.startswith("image:"):
+                    img_p = line.split(":", 1)[1].strip()
+                    if img_p:
+                        referenced.add(img_p)
+                elif line.startswith("backing file:"):
+                    bf = line.split(":", 1)[1].strip()
+                    # Strip optional '(actual path: ...)' suffix
+                    actual_m = re.search(r"\(actual path:\s*([^)]+)\)", bf)
+                    if actual_m:
+                        referenced.add(actual_m.group(1).strip())
+                    else:
+                        referenced.add(bf)
+    return referenced
+
+
+def _refresh_vm_yaml_disks(config_path: Path | None, active_disks: list[dict[str, str]]) -> bool:
+    """Updates vm.disks[].source in vm.yaml to match live active disk overlay paths."""
+    if not config_path or not config_path.exists() or config_path.suffix not in (".yaml", ".yml") or yaml is None:
+        return False
+    if not active_disks:
+        return False
+    try:
+        doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        vm_data = doc.get("vm", {})
+        disks = vm_data.get("disks", [])
+        if not isinstance(disks, list):
+            return False
+        by_target = {d["target"]: d["source"] for d in active_disks}
+        changed = False
+        for entry in disks:
+            if isinstance(entry, dict):
+                tgt = entry.get("target")
+                if tgt in by_target and entry.get("source") != by_target[tgt]:
+                    entry["source"] = by_target[tgt]
+                    changed = True
+        if changed:
+            config_path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+        return changed
+    except Exception:
+        return False
+
+
+def execute_snapshot_delete(
+    params: dict,
+    host: str,
+    snapshot_name: str,
+    force: bool = False,
+    dry_run: bool = False,
+    config_path: Path | None = None,
+) -> int:
+    """Safely deletes an external disk-only snapshot, merging/pivoting the qcow2 chain and pruning orphaned overlays."""
+    vm_name = params["VM_NAME"]
+    baseline_name = params.get("SNAPSHOT_BASE_NAME", "snapshot-base-clean")
+    snap_name = (snapshot_name or "").strip()
+
+    # Gate 1: Explicit, non-empty snapshot name required (never default to baseline)
+    if not snap_name or snap_name == "default":
+        print("[-] Error: Explicit snapshot_name is required for snapshot deletion (will never default to baseline).", file=sys.stderr)
+        return 1
+
+    # Gate 2: Protect baseline snapshot unless --force is explicitly passed
+    if snap_name == baseline_name and not force:
+        print(
+            f"[-] Error: Refusing to delete baseline snapshot '{baseline_name}' without --force (or force=True).",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Gate 3: Verify snapshot exists on hypervisor
+    rc_list, list_out, list_err = run_cmd_status(["sudo", "virsh", "snapshot-list", vm_name, "--name"], host=host)
+    if rc_list != 0:
+        print(f"[-] Error querying snapshots for '{vm_name}' on {host}: {list_err}", file=sys.stderr)
+        return 1
+
+    existing_snaps = [ln.strip() for ln in list_out.splitlines() if ln.strip()]
+    if snap_name not in existing_snaps:
+        avail = ", ".join(existing_snaps) if existing_snaps else "(none)"
+        print(
+            f"[-] Error: Snapshot '{snap_name}' not found on domain '{vm_name}'. Available snapshots: {avail}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Capture target snapshot's overlay disk paths before deletion for post-delete orphan verification
+    rc_sxml, snap_xml, _ = run_cmd_status(["sudo", "virsh", "snapshot-dumpxml", vm_name, snap_name], host=host)
+    snap_overlays = _parse_snapshot_overlay_paths(snap_xml) if rc_sxml == 0 else []
+
+    print(f"[*] Deleting snapshot '{snap_name}' on domain '{vm_name}' ({host})...")
+    if dry_run:
+        print(f"    [PLAN] sudo virsh snapshot-delete --domain {vm_name} --snapshotname {snap_name}")
+        if snap_overlays:
+            print(f"    [PLAN] Verify backing chain and unlink any unreferenced overlay(s): {[p for _, p in snap_overlays]}")
+        payload = {
+            "deleted_snapshot": snap_name,
+            "remaining_snapshots": [s for s in existing_snaps if s != snap_name],
+            "active_disks": _list_active_disks(vm_name, host),
+            "removed_overlays": [],
+            "vm_yaml_updated": False,
+            "dry_run": True,
+        }
+        print(f"AIRLOCK_SNAPSHOT_DELETE_JSON:{json.dumps(payload)}")
+        return 0
+
+    # Primary path: native libvirt external snapshot deletion (libvirt >= 9.0, e.g. Ubuntu 24.04 libvirt 10.0)
+    del_cmd = ["sudo", "virsh", "snapshot-delete", "--domain", vm_name, "--snapshotname", snap_name]
+    ret, out, err = run_cmd_status(del_cmd, host=host)
+
+    if ret != 0:
+        err_lower = (err or "").lower()
+        unsupported = (
+            "unsupported" in err_lower
+            or "external disk snapshot" in err_lower
+            or "not supported" in err_lower
+        )
+        if not unsupported:
+            print(f"[-] Error deleting snapshot '{snap_name}': {err or out}", file=sys.stderr)
+            return 1
+
+        # Fallback path for older libvirt (< 9.0): blockcommit active/mid-chain overlay, then delete --metadata
+        print(f"    [*] Native external snapshot delete unsupported on {host}; falling back to blockcommit + --metadata...")
+        exists, state = check_domain_status(vm_name, host)
+        if not exists or state.lower() != "running":
+            print(
+                f"[-] Error: Fallback blockcommit requires domain '{vm_name}' to be running (current state: {state}).",
+                file=sys.stderr,
+            )
+            return 1
+
+        active_before = {d["target"]: d["source"] for d in _list_active_disks(vm_name, host)}
+        for target_dev, overlay_path in snap_overlays:
+            if active_before.get(target_dev) == overlay_path:
+                bc_cmd = ["sudo", "virsh", "blockcommit", vm_name, target_dev, "--active", "--pivot", "--wait"]
+            else:
+                bc_cmd = ["sudo", "virsh", "blockcommit", vm_name, target_dev, "--top", overlay_path, "--wait"]
+            rc_bc, _, err_bc = run_cmd_status(bc_cmd, host=host)
+            if rc_bc != 0:
+                print(f"[-] Error during blockcommit for '{target_dev}': {err_bc}", file=sys.stderr)
+                return 1
+
+        rc_meta, _, err_meta = run_cmd_status(
+            ["sudo", "virsh", "snapshot-delete", "--domain", vm_name, "--snapshotname", snap_name, "--metadata"],
+            host=host,
+        )
+        if rc_meta != 0:
+            print(f"[-] Error removing snapshot metadata for '{snap_name}': {err_meta}", file=sys.stderr)
+            return 1
+
+    # Query remaining snapshots & active disks post-delete
+    rc_rem, rem_out, _ = run_cmd_status(["sudo", "virsh", "snapshot-list", vm_name, "--name"], host=host)
+    remaining_snaps = [ln.strip() for ln in rem_out.splitlines() if ln.strip()] if rc_rem == 0 else []
+    active_disks = _list_active_disks(vm_name, host)
+
+    # Safely unlink any unreferenced overlay files left behind by the deleted snapshot
+    protected_basenames = {
+        GOLDEN_IMAGE_FILENAME,
+        "ubuntu-24.04-minimal-cloudimg.img",
+        "noble-server-cloudimg-amd64.img",
+    }
+    referenced = _collect_backing_chain_paths(active_disks, host)
+    for rem_snap in remaining_snaps:
+        rc_rxml, rxml, _ = run_cmd_status(["sudo", "virsh", "snapshot-dumpxml", vm_name, rem_snap], host=host)
+        if rc_rxml == 0 and rxml:
+            for _, rpath in _parse_snapshot_overlay_paths(rxml):
+                referenced.add(rpath)
+
+    removed_overlays: list[str] = []
+    for _, cand_path in snap_overlays:
+        if not cand_path or cand_path in referenced:
+            continue
+        if os.path.basename(cand_path) in protected_basenames:
+            continue
+        rc_rm, out_rm, _ = run_cmd_status(
+            ["sudo", "bash", "-c", f"if [ -e {shlex.quote(cand_path)} ]; then rm -f -- {shlex.quote(cand_path)} && echo REMOVED; fi"],
+            host=host,
+        )
+        if rc_rm == 0 and "REMOVED" in out_rm:
+            removed_overlays.append(cand_path)
+            print(f"    [✓] Removed unreferenced overlay: {cand_path}")
+
+    # Refresh vm.yaml disk source entries if active overlay paths changed
+    vm_yaml_updated = _refresh_vm_yaml_disks(config_path, active_disks)
+    if vm_yaml_updated:
+        print(f"    [✓] Updated vm.yaml disk sources to match active backing chain.")
+
+    print(f"[✓] Snapshot '{snap_name}' deleted successfully. Remaining snapshots: {len(remaining_snaps)}")
+    payload = {
+        "deleted_snapshot": snap_name,
+        "remaining_snapshots": remaining_snaps,
+        "active_disks": active_disks,
+        "removed_overlays": removed_overlays,
+        "vm_yaml_updated": vm_yaml_updated,
+        "dry_run": False,
+    }
+    print(f"AIRLOCK_SNAPSHOT_DELETE_JSON:{json.dumps(payload)}")
+    return 0
+
+
 def execute_power_action(params: dict, action: str) -> None:
     """Controls VM lifecycle (start, stop, reboot, destroy)."""
     vm_name = params["VM_NAME"]
@@ -1347,6 +1587,7 @@ def main():
     parser.add_argument("--reboot", action="store_true", help="Reboot the VM domain")
     parser.add_argument("--snapshot", nargs="?", const="default", help="Create a snapshot (optional snapshot name)")
     parser.add_argument("--rollback", nargs="?", const="default", help="Revert to baseline or named snapshot")
+    parser.add_argument("--delete-snapshot", type=str, metavar="SNAPSHOT_NAME", help="Safely delete a named external disk snapshot (requires --force for baseline snapshot)")
     parser.add_argument("-y", "--yes", action="store_true", help="Auto-confirm deployment without interactive prompt")
     parser.add_argument("--vm", type=str, help="Target VM domain name in inventory (e.g. airlock-vm)")
     parser.add_argument("--config", type=Path, default=None, help="Path to VM specification YAML (default: auto-detected from inventory)")
@@ -1428,11 +1669,22 @@ def main():
         execute_power_action(params, "reboot")
         sys.exit(0)
 
-    # Handle snapshot / rollback actions
+    # Handle snapshot / rollback / delete-snapshot actions
     if args.snapshot is not None:
         sys.exit(execute_snapshot(params, host, snapshot_name=args.snapshot, dry_run=args.dry_run))
     if args.rollback is not None:
         sys.exit(execute_rollback(params, host, snapshot_name=args.rollback, dry_run=args.dry_run))
+    if args.delete_snapshot is not None:
+        sys.exit(
+            execute_snapshot_delete(
+                params,
+                host,
+                snapshot_name=args.delete_snapshot,
+                force=args.force,
+                dry_run=args.dry_run,
+                config_path=config_path,
+            )
+        )
 
     # Handle validate-proxy action
     if args.validate_proxy:
