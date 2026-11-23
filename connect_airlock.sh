@@ -233,7 +233,7 @@ resolve_targets() {
         if [[ "$scope" == "global" ]]; then
           CONFIG_TARGETS+=("Antigravity|global|${HOME}/.gemini/config/mcp_config.json")
         else
-          CONFIG_TARGETS+=("Antigravity|project|${base}/.gemini/mcp_config.json")
+          CONFIG_TARGETS+=("Antigravity|project|${base}/.agents/plugins/airlock/mcp_config.json")
         fi
         ;;
       vscode)
@@ -350,6 +350,7 @@ AIRLOCK_ARGS_LIST="$ARGS_LIST" \
 "$AIRLOCK_PYTHON" - <<'PYEOF'
 import json
 import os
+import shutil
 import sys
 
 raw_targets = os.environ.get("AIRLOCK_RAW_TARGETS", "").strip().splitlines()
@@ -381,11 +382,14 @@ if action == "list":
     for label, scope, path in targets:
         exists = os.path.exists(path)
         is_registered = False
+        is_antigravity_plugin = (label == "Antigravity" and scope == "project")
+        plugin_manifest = os.path.join(os.path.dirname(path), "plugin.json")
         if exists:
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     doc = json.load(f)
-                is_registered = "airlock" in doc.get("mcpServers", {}) or "airlock" in doc.get("servers", {})
+                has_server = "airlock" in doc.get("mcpServers", {}) or "airlock" in doc.get("servers", {})
+                is_registered = has_server and (not is_antigravity_plugin or os.path.exists(plugin_manifest))
             except Exception:
                 pass
         status_str = "[ACTIVE]    " if is_registered else ("[FILE EXISTS]" if exists else "[NOT FOUND] ")
@@ -404,6 +408,9 @@ for label, scope, path in targets:
     # In project mode, if creating a new file, ensure directory exists
     # If in global mode, skip if parent config folder doesn't exist to avoid cluttering unused IDEs
     parent_dir = os.path.dirname(path)
+    is_antigravity_plugin = (label == "Antigravity" and scope == "project")
+    plugin_manifest_path = os.path.join(parent_dir, "plugin.json")
+
     if scope == "global" and action == "add" and not os.path.exists(parent_dir):
         # Don't create global directories for IDEs the user hasn't installed
         continue
@@ -421,6 +428,8 @@ for label, scope, path in targets:
         data = {}
 
     changed = False
+    manifest_changed = False
+    manifest_data = {}
 
     if action == "add":
         # VS Code and some variants support both mcpServers and servers
@@ -428,15 +437,28 @@ for label, scope, path in targets:
             if data["servers"].get("airlock") != server_entry:
                 data["servers"]["airlock"] = server_entry
                 changed = True
-        
+
         mcp_servers = data.setdefault("mcpServers", {})
         if not isinstance(mcp_servers, dict):
             mcp_servers = {}
             data["mcpServers"] = mcp_servers
-            
+
         if mcp_servers.get("airlock") != server_entry:
             mcp_servers["airlock"] = server_entry
             changed = True
+
+        if is_antigravity_plugin:
+            if os.path.exists(plugin_manifest_path):
+                try:
+                    with open(plugin_manifest_path, "r", encoding="utf-8") as f:
+                        existing_manifest = json.load(f)
+                    if isinstance(existing_manifest, dict):
+                        manifest_data = existing_manifest
+                except Exception:
+                    manifest_data = {}
+            if manifest_data.get("name") != "airlock" or not os.path.exists(plugin_manifest_path):
+                manifest_data["name"] = "airlock"
+                manifest_changed = True
 
     elif action == "remove":
         if "mcpServers" in data and isinstance(data["mcpServers"], dict) and "airlock" in data["mcpServers"]:
@@ -446,16 +468,37 @@ for label, scope, path in targets:
             del data["servers"]["airlock"]
             changed = True
 
-    if changed or (action == "add" and not os.path.exists(path)):
+        # For workspace Antigravity plugin, remove .agents/plugins/airlock/ cleanly if no other servers remain
+        if is_antigravity_plugin and os.path.exists(parent_dir):
+            remaining_mcp = data.get("mcpServers", {}) if isinstance(data.get("mcpServers"), dict) else {}
+            remaining_srv = data.get("servers", {}) if isinstance(data.get("servers"), dict) else {}
+            if not remaining_mcp and not remaining_srv:
+                modified_count += 1
+                if dry_run:
+                    print(f"[DRY-RUN] Would remove {label} ({scope}) plugin directory: {parent_dir}")
+                else:
+                    shutil.rmtree(parent_dir, ignore_errors=True)
+                    print(f"[✓] Removed {label} ({scope}) plugin directory: {parent_dir}")
+                continue
+
+    if changed or manifest_changed or (action == "add" and not os.path.exists(path)):
         modified_count += 1
         output = json.dumps(data, indent=2) + "\n"
         if dry_run:
-            print(f"[DRY-RUN] Would update {label} ({scope}): {path}")
+            if manifest_changed:
+                print(f"[DRY-RUN] Would update {label} ({scope}) manifest: {plugin_manifest_path}")
+            if changed or not os.path.exists(path):
+                print(f"[DRY-RUN] Would update {label} ({scope}): {path}")
         else:
             os.makedirs(parent_dir, exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(output)
-            print(f"[✓] Updated {label} ({scope}): {path}")
+            if manifest_changed:
+                with open(plugin_manifest_path, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(manifest_data, indent=2) + "\n")
+                print(f"[✓] Updated {label} ({scope}) manifest: {plugin_manifest_path}")
+            if changed or not os.path.exists(path):
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(output)
+                print(f"[✓] Updated {label} ({scope}): {path}")
     else:
         print(f"[=] Unchanged {label} ({scope}): {path}")
 

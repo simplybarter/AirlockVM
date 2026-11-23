@@ -60,7 +60,7 @@ You do not need to edit complex JSON files manually. AirlockVM includes a multi-
 ```
 
 *Supported Environments:*
-* **Google Antigravity** (`.gemini/mcp_config.json`)
+* **Google Antigravity** (`.agents/plugins/airlock/mcp_config.json` + `plugin.json`, or `~/.gemini/config/mcp_config.json` globally)
 * **Cursor IDE** (`.cursor/mcp.json`)
 * **VS Code** (`.vscode/mcp.json`)
 * **Claude Desktop & Claude Code CLI** (`.mcp.json`)

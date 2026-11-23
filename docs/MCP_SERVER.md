@@ -149,7 +149,7 @@ Or using direct Python execution:
 
 AirlockVM provides a helper script (`connect_airlock.sh`) to automatically register or remove the AirlockVM MCP Server across all major IDEs and AI agent harnesses without manual JSON editing:
 
-* **Supported Platforms**: VS Code (`.vscode/mcp.json`), Antigravity / Gemini (`.gemini/mcp_config.json`), Cursor (`.cursor/mcp.json`), Claude (`.mcp.json` / `claude_desktop_config.json`), Windsurf (`.codeium/windsurf/mcp_config.json`), JetBrains (`.idea/mcp.json`), and universal root `.mcp.json`.
+* **Supported Platforms**: VS Code (`.vscode/mcp.json`), Antigravity (`.agents/plugins/airlock/{plugin.json,mcp_config.json}` for workspace or `~/.gemini/config/mcp_config.json` globally), Cursor (`.cursor/mcp.json`), Claude (`.mcp.json` / `claude_desktop_config.json`), Windsurf (`.codeium/windsurf/mcp_config.json`), JetBrains (`.idea/mcp.json`), and universal root `.mcp.json`.
 
 ```bash
 # Connect the current client project workspace (with interactive confirmation):

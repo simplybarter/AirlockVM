@@ -467,17 +467,23 @@ class TestPermutationH_ClientConnectorCLI(unittest.TestCase):
         self.assertIn("Aborted by user.", proc.stdout)
 
     def test_connector_with_auto_yes(self):
-        proc = subprocess.run(
-            ["./connect_airlock.sh", "--target", str(DUMMY_APP_DIR), "-y", "--antigravity"],
-            cwd=str(AIRLOCK_ROOT),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=10,
-        )
-        self.assertEqual(proc.returncode, 0)
-        self.assertIn("Target Location:", proc.stdout)
-        self.assertIn("Completed. Total configs updated:", proc.stdout)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir)
+            proc = subprocess.run(
+                ["./connect_airlock.sh", "--target", str(ws), "-y", "--antigravity"],
+                cwd=str(AIRLOCK_ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("Target Location:", proc.stdout)
+            self.assertIn("Completed. Total configs updated:", proc.stdout)
+            plugin_dir = ws / ".agents" / "plugins" / "airlock"
+            self.assertTrue((plugin_dir / "plugin.json").exists())
+            self.assertTrue((plugin_dir / "mcp_config.json").exists())
+            self.assertFalse((ws / ".gemini" / "mcp_config.json").exists())
 
     def test_connector_default_target_directory(self):
         proc = subprocess.run(

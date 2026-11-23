@@ -1073,6 +1073,104 @@ class TestMitigationsUnit(unittest.TestCase):
             self.assertNotIn("docs/README.md", proc.stdout)
             self.assertNotIn("data/raw/big.csv", proc.stdout)
 
+    def test_antigravity_connector_workspace_plugin_idempotent_remove_and_global(self):
+        import json
+        import subprocess
+
+        connector = str(AIRLOCK_ROOT / "connect_airlock.sh")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ws = root / "my-workspace"
+            ws.mkdir()
+            fake_home = root / "home"
+            (fake_home / ".gemini" / "config").mkdir(parents=True)
+            global_cfg = fake_home / ".gemini" / "config" / "mcp_config.json"
+            global_cfg.write_text(
+                json.dumps({"mcpServers": {"existing-tool": {"command": "/usr/bin/existing"}}}, indent=2),
+                encoding="utf-8",
+            )
+            env = {**os.environ, "HOME": str(fake_home), "NO_COLOR": "1"}
+
+            # 1. Workspace install creates .agents/plugins/airlock/{plugin.json,mcp_config.json}
+            p1 = subprocess.run(
+                [connector, "--target", str(ws), "--antigravity", "-y"],
+                cwd=str(AIRLOCK_ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertEqual(p1.returncode, 0, p1.stderr)
+            plugin_dir = ws / ".agents" / "plugins" / "airlock"
+            manifest_file = plugin_dir / "plugin.json"
+            mcp_file = plugin_dir / "mcp_config.json"
+            self.assertTrue(manifest_file.exists())
+            self.assertTrue(mcp_file.exists())
+            self.assertFalse((ws / ".gemini" / "mcp_config.json").exists())
+            self.assertEqual(json.loads(manifest_file.read_text(encoding="utf-8")), {"name": "airlock"})
+            mcp_doc = json.loads(mcp_file.read_text(encoding="utf-8"))
+            self.assertIn("airlock", mcp_doc["mcpServers"])
+            self.assertIn("command", mcp_doc["mcpServers"]["airlock"])
+
+            # 2. Idempotent re-run preserves existing mcpServers entries
+            mcp_doc["mcpServers"]["other-server"] = {"command": "/usr/bin/other"}
+            mcp_file.write_text(json.dumps(mcp_doc, indent=2) + "\n", encoding="utf-8")
+            p2 = subprocess.run(
+                [connector, "--target", str(ws), "--antigravity", "-y"],
+                cwd=str(AIRLOCK_ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertEqual(p2.returncode, 0, p2.stderr)
+            mcp_doc2 = json.loads(mcp_file.read_text(encoding="utf-8"))
+            self.assertIn("airlock", mcp_doc2["mcpServers"])
+            self.assertEqual(mcp_doc2["mcpServers"]["other-server"], {"command": "/usr/bin/other"})
+
+            # 3. Remove with another server present keeps other-server; remove when sole server deletes plugin dir
+            p3 = subprocess.run(
+                [connector, "--target", str(ws), "--antigravity", "--remove", "-y"],
+                cwd=str(AIRLOCK_ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertEqual(p3.returncode, 0, p3.stderr)
+            self.assertTrue(plugin_dir.exists())
+            mcp_doc3 = json.loads(mcp_file.read_text(encoding="utf-8"))
+            self.assertNotIn("airlock", mcp_doc3["mcpServers"])
+            self.assertIn("other-server", mcp_doc3["mcpServers"])
+
+            # Now remove other-server, re-install airlock alone, then remove -> entire plugin dir deleted
+            mcp_file.write_text(json.dumps({"mcpServers": {}}, indent=2) + "\n", encoding="utf-8")
+            subprocess.run([connector, "--target", str(ws), "--antigravity", "-y"], cwd=str(AIRLOCK_ROOT), env=env, check=True, capture_output=True)
+            p4 = subprocess.run(
+                [connector, "--target", str(ws), "--antigravity", "--remove", "-y"],
+                cwd=str(AIRLOCK_ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertEqual(p4.returncode, 0, p4.stderr)
+            self.assertFalse(plugin_dir.exists())
+
+            # 4. Global Antigravity mode merges into ~/.gemini/config/mcp_config.json preserving existing entries
+            p5 = subprocess.run(
+                [connector, "--global", "--antigravity", "-y"],
+                cwd=str(AIRLOCK_ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertEqual(p5.returncode, 0, p5.stderr)
+            gdoc = json.loads(global_cfg.read_text(encoding="utf-8"))
+            self.assertIn("airlock", gdoc["mcpServers"])
+            self.assertEqual(gdoc["mcpServers"]["existing-tool"], {"command": "/usr/bin/existing"})
+
 
 if __name__ == "__main__":
     unittest.main()

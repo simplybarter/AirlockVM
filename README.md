@@ -114,7 +114,7 @@ AirlockVM operates as a standalone infrastructure control plane. Individual appl
 ./connect_airlock.sh --global
 ```
 
-For manual MCP integration or agent harnesses, configure `.gemini/mcp_config.json`:
+For manual Antigravity workspace MCP integration, create `.agents/plugins/airlock/plugin.json` (`{"name": "airlock"}`) alongside `.agents/plugins/airlock/mcp_config.json` (or configure `~/.gemini/config/mcp_config.json` globally):
 
 ```json
 {

@@ -57,7 +57,7 @@ flowchart TD
   ./connect_airlock.sh --target ../DummyAirlockApp
   ```
 * **Success Criteria**:
-  - Creates `<client-project>/.gemini/mcp_config.json`.
+  - Creates `<client-project>/.agents/plugins/airlock/plugin.json` and `<client-project>/.agents/plugins/airlock/mcp_config.json`.
   - Configures the `airlock` MCP server pointing to AirlockVM's Python virtual environment (`.venv/bin/airlock-mcp`).
 
 ---
