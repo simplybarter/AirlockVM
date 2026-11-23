@@ -1300,6 +1300,63 @@ class TestMitigationsUnit(unittest.TestCase):
             self.assertNotEqual(p3.returncode, 0)
             self.assertIn("Multiple VMs match current directory", p3.stderr)
 
+    def test_include_expansion_preserves_dotfile_and_dotdir_prefixes(self):
+        import subprocess
+
+        sync_mod = _load_module(
+            "generate_sync_dotdir_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_rsync" / "scripts" / "generate_sync.py",
+        )
+
+        # 1. Unit check on _expand_include_patterns for both ".agents/..." and "./.agents/..."
+        expected = [
+            ".agents/",
+            ".agents/skills/",
+            ".agents/skills/foo/",
+            ".agents/skills/foo/scripts/",
+            ".agents/skills/foo/scripts/***",
+        ]
+        self.assertEqual(
+            sync_mod._expand_include_patterns([".agents/skills/foo/scripts/"]),
+            expected,
+        )
+        self.assertEqual(
+            sync_mod._expand_include_patterns(["./.agents/skills/foo/scripts/"]),
+            expected,
+        )
+
+        # 2. End-to-end --offline rsync verification: targeted scripts under .agents/ are included
+        #    while sibling files under .agents/ are excluded by .agents/**
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            app_dir = root / "dot-app"
+            (app_dir / ".agents" / "skills" / "foo" / "scripts").mkdir(parents=True)
+            (app_dir / ".agents" / "skills" / "bar").mkdir(parents=True)
+            (app_dir / ".agents" / "skills" / "foo" / "scripts" / "run.py").write_text("print('ok')\n", encoding="utf-8")
+            (app_dir / ".agents" / "skills" / "bar" / "SKILL.md").write_text("# secret\n", encoding="utf-8")
+            (app_dir / ".agents" / "notes.txt").write_text("ignore\n", encoding="utf-8")
+
+            repos = [{
+                "name": "dot-app",
+                "local_path": str(app_dir),
+                "remote_path": "~/dot-app/",
+                "internal_port": 8000,
+                "external_port": 8001,
+                "post_deploy": "",
+                "include": [".agents/skills/foo/scripts/"],
+                "exclude": [".agents/**"],
+            }]
+            exclusions = sync_mod.evaluate_project_exclusions()
+            sp = root / "deploy_app_to_airlock.sh"
+            sp.write_text(sync_mod.generate_shell_script("dot-vm", repos, exclusions), encoding="utf-8")
+            sp.chmod(0o755)
+
+            proc = subprocess.run([str(sp), "--offline"], capture_output=True, text=True, check=False)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn(".agents/skills/foo/scripts/run.py", proc.stdout)
+            self.assertNotIn(".agents/skills/bar/SKILL.md", proc.stdout)
+            self.assertNotIn(".agents/notes.txt", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

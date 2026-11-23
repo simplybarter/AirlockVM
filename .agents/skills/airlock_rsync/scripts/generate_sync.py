@@ -188,7 +188,10 @@ def _expand_include_patterns(patterns: list[str]) -> list[str]:
             expanded.append(p)
 
     for raw in patterns:
-        pat = str(raw).strip().lstrip("./")
+        pat = str(raw).strip()
+        while pat.startswith("./"):
+            pat = pat[2:]
+        pat = pat.lstrip("/")
         if not pat:
             continue
         is_dir = pat.endswith("/")
