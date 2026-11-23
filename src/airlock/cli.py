@@ -378,11 +378,11 @@ def main(argv: list[str] | None = None) -> int:
     p_drift.add_argument("vm_name", help="Domain name of target VM")
 
     # snapshot
-    p_snap = subparsers.add_parser("snapshot", help="Create, revert, list, or delete VM disk snapshots")
+    p_snap = subparsers.add_parser("snapshot", help="Create, revert, list, delete, or flatten VM disk snapshots")
     p_snap.add_argument("vm_name", help="Domain name of target VM")
-    p_snap.add_argument("action", choices=["create", "revert", "rollback", "list", "delete"], help="Snapshot action")
-    p_snap.add_argument("snapshot_name", nargs="?", default="", help="Snapshot name (required for 'delete')")
-    p_snap.add_argument("--force", action="store_true", help="Allow deleting the protected baseline snapshot")
+    p_snap.add_argument("action", choices=["create", "revert", "rollback", "list", "delete", "flatten"], help="Snapshot action")
+    p_snap.add_argument("snapshot_name", nargs="?", default="", help="Snapshot name (required for 'delete'; optional fresh baseline name for 'flatten')")
+    p_snap.add_argument("--force", action="store_true", help="Confirm destructive snapshot actions (flatten or deleting baseline snapshot)")
     p_snap.add_argument("--dry-run", action="store_true", help="Preview snapshot action without modifying hypervisor")
 
     # audit-security

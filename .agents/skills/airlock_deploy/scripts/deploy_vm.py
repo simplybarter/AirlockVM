@@ -1075,26 +1075,57 @@ def _collect_backing_chain_paths(active_disks: list[dict[str, str]], host: str) 
     return referenced
 
 
-def _refresh_vm_yaml_disks(config_path: Path | None, active_disks: list[dict[str, str]]) -> bool:
-    """Updates vm.disks[].source in vm.yaml to match live active disk overlay paths."""
+def _get_ordered_backing_chain(disk_path: str, host: str) -> list[str]:
+    """Returns the ordered qcow2 backing chain [active_leaf, parent, ..., root] for a disk."""
+    if not disk_path:
+        return []
+    rc, out, _ = run_cmd_status(["sudo", "qemu-img", "info", "--backing-chain", disk_path], host=host)
+    chain: list[str] = []
+    if rc == 0 and out:
+        for line in out.splitlines():
+            if line.startswith("image:"):
+                img_p = line.split(":", 1)[1].strip()
+                if img_p and img_p not in chain:
+                    chain.append(img_p)
+    if not chain:
+        chain.append(disk_path)
+    return chain
+
+
+def _find_vm_base_disk(chain: list[str], protected_basenames: set[str]) -> str | None:
+    """Finds the VM's own base disk in an ordered backing chain, stopping before shared golden/cloud images."""
+    vm_owned = [p for p in chain if os.path.basename(p) not in protected_basenames]
+    return vm_owned[-1] if vm_owned else (chain[-1] if chain else None)
+
+
+def _refresh_vm_yaml_disks(
+    config_path: Path | None,
+    active_disks: list[dict[str, str]],
+    new_baseline_name: str = "",
+) -> bool:
+    """Updates vm.disks[].source (and optionally blueprint.snapshot_base_name) in vm.yaml."""
     if not config_path or not config_path.exists() or config_path.suffix not in (".yaml", ".yml") or yaml is None:
         return False
-    if not active_disks:
+    if not active_disks and not new_baseline_name:
         return False
     try:
         doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
         vm_data = doc.get("vm", {})
         disks = vm_data.get("disks", [])
-        if not isinstance(disks, list):
-            return False
-        by_target = {d["target"]: d["source"] for d in active_disks}
         changed = False
-        for entry in disks:
-            if isinstance(entry, dict):
-                tgt = entry.get("target")
-                if tgt in by_target and entry.get("source") != by_target[tgt]:
-                    entry["source"] = by_target[tgt]
-                    changed = True
+        if isinstance(disks, list) and active_disks:
+            by_target = {d["target"]: d["source"] for d in active_disks}
+            for entry in disks:
+                if isinstance(entry, dict):
+                    tgt = entry.get("target")
+                    if tgt in by_target and entry.get("source") != by_target[tgt]:
+                        entry["source"] = by_target[tgt]
+                        changed = True
+        if new_baseline_name:
+            bp = vm_data.setdefault("blueprint", {})
+            if bp.get("snapshot_base_name") != new_baseline_name:
+                bp["snapshot_base_name"] = new_baseline_name
+                changed = True
         if changed:
             config_path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
         return changed
@@ -1254,6 +1285,218 @@ def execute_snapshot_delete(
         "dry_run": False,
     }
     print(f"AIRLOCK_SNAPSHOT_DELETE_JSON:{json.dumps(payload)}")
+    return 0
+
+
+def execute_snapshot_flatten(
+    params: dict,
+    host: str,
+    snapshot_name: str = "",
+    force: bool = False,
+    dry_run: bool = False,
+    config_path: Path | None = None,
+) -> int:
+    """Flattens a VM's external qcow2 snapshot chain into its VM-owned base disk, prunes all prior
+    snapshot metadata and unreferenced overlays, and optionally creates one fresh baseline snapshot."""
+    vm_name = params["VM_NAME"]
+    new_snap = (snapshot_name or "").strip()
+    if new_snap == "default":
+        new_snap = ""
+
+    protected_basenames = {
+        GOLDEN_IMAGE_FILENAME,
+        "ubuntu-24.04-minimal-cloudimg.img",
+        "noble-server-cloudimg-amd64.img",
+    }
+
+    # Step 1: Inspect existing snapshots and active disk backing chains
+    rc_list, list_out, list_err = run_cmd_status(["sudo", "virsh", "snapshot-list", vm_name, "--name"], host=host)
+    if rc_list != 0:
+        print(f"[-] Error querying snapshots for '{vm_name}' on {host}: {list_err}", file=sys.stderr)
+        return 1
+
+    existing_snaps = [ln.strip() for ln in list_out.splitlines() if ln.strip()]
+    active_disks = _list_active_disks(vm_name, host)
+
+    commit_plan: list[dict[str, Any]] = []
+    candidate_overlays: list[str] = []
+    seen_candidates: set[str] = set()
+
+    def _add_candidate(path_str: str) -> None:
+        if path_str and path_str not in seen_candidates and os.path.basename(path_str) not in protected_basenames:
+            seen_candidates.add(path_str)
+            candidate_overlays.append(path_str)
+
+    for d in active_disks:
+        src = d["source"]
+        chain = _get_ordered_backing_chain(src, host)
+        vm_base = _find_vm_base_disk(chain, protected_basenames)
+        if vm_base and src != vm_base:
+            base_idx = chain.index(vm_base)
+            disk_overlays = chain[:base_idx]
+            commit_plan.append({
+                "target": d["target"],
+                "active": src,
+                "base": vm_base,
+                "overlays": disk_overlays,
+            })
+            for ov in disk_overlays:
+                _add_candidate(ov)
+
+    for snap in existing_snaps:
+        rc_sxml, sxml, _ = run_cmd_status(["sudo", "virsh", "snapshot-dumpxml", vm_name, snap], host=host)
+        if rc_sxml == 0 and sxml:
+            for _, ov_path in _parse_snapshot_overlay_paths(sxml):
+                _add_candidate(ov_path)
+
+    # Early no-op if no snapshots and no overlays above VM base disk
+    if not existing_snaps and not commit_plan:
+        print(f"[✓] Domain '{vm_name}' has no snapshots or overlays to flatten (already flat).")
+        payload = {
+            "changed": False,
+            "removed_snapshots": [],
+            "unlinked_files": [],
+            "active_disks": active_disks,
+            "new_snapshot": "",
+            "remaining_snapshots": [],
+            "vm_yaml_updated": False,
+            "dry_run": dry_run,
+        }
+        print(f"AIRLOCK_SNAPSHOT_FLATTEN_JSON:{json.dumps(payload)}")
+        return 0
+
+    print(f"[*] Flattening snapshot chain for domain '{vm_name}' on {host} ({len(existing_snaps)} snapshot(s), {len(commit_plan)} disk(s) with overlays)...")
+
+    if dry_run:
+        for item in commit_plan:
+            print(
+                f"    [PLAN] sudo virsh blockcommit {vm_name} {item['target']} "
+                f"--base {item['base']} --active --pivot --wait"
+            )
+        for snap in reversed(existing_snaps):
+            print(f"    [PLAN] sudo virsh snapshot-delete --domain {vm_name} --snapshotname {snap} --metadata")
+        if candidate_overlays:
+            print(f"    [PLAN] Verify unreferenced and unlink overlay(s): {candidate_overlays}")
+        if new_snap:
+            print(f"    [PLAN] sudo virsh snapshot-create-as --domain {vm_name} --name {new_snap} --disk-only")
+        payload = {
+            "changed": True,
+            "removed_snapshots": list(existing_snaps),
+            "unlinked_files": candidate_overlays,
+            "active_disks": active_disks,
+            "new_snapshot": new_snap,
+            "remaining_snapshots": [new_snap] if new_snap else [],
+            "vm_yaml_updated": False,
+            "dry_run": True,
+        }
+        print(f"AIRLOCK_SNAPSHOT_FLATTEN_JSON:{json.dumps(payload)}")
+        return 0
+
+    # Force gate: flattening discards all existing rollback points (including baseline)
+    if not force:
+        print(
+            f"[-] Error: Flattening discards all {len(existing_snaps)} existing rollback point(s) "
+            f"({', '.join(existing_snaps) or 'overlays'}). Re-run with --force (or force=True) to confirm, or --dry-run to preview.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Step 2: Live blockcommit requires domain to be running
+    if commit_plan:
+        exists, state = check_domain_status(vm_name, host)
+        if not exists or state.lower() != "running":
+            print(
+                f"[-] Error: Live blockcommit flattening requires domain '{vm_name}' to be running "
+                f"(current state: {state}). Start the VM first with 'airlock power {vm_name} start' or 'virsh start {vm_name}'.",
+                file=sys.stderr,
+            )
+            return 1
+
+    # Step 3: Collapse backing chain per disk into each VM-owned base disk (never touching shared golden/cloud images)
+    for item in commit_plan:
+        bc_cmd = [
+            "sudo", "virsh", "blockcommit", vm_name, item["target"],
+            "--base", item["base"],
+            "--active", "--pivot", "--wait",
+        ]
+        print(f"    -> Committing '{item['target']}' overlays into base '{item['base']}'...")
+        rc_bc, out_bc, err_bc = run_cmd_status(bc_cmd, host=host)
+        if rc_bc != 0:
+            print(f"[-] Error during blockcommit for '{item['target']}': {err_bc or out_bc}", file=sys.stderr)
+            return 1
+        print(f"    [✓] Pivoted '{item['target']}' onto '{item['base']}'.")
+
+    # Step 4: Delete all old libvirt snapshot metadata records (leaf-first)
+    removed_snapshots: list[str] = []
+    for snap in reversed(existing_snaps):
+        rc_meta, _, err_meta = run_cmd_status(
+            ["sudo", "virsh", "snapshot-delete", "--domain", vm_name, "--snapshotname", snap, "--metadata"],
+            host=host,
+        )
+        if rc_meta != 0:
+            print(f"[-] Warning: Failed to delete metadata for snapshot '{snap}': {err_meta}", file=sys.stderr)
+        else:
+            removed_snapshots.append(snap)
+            print(f"    [✓] Removed snapshot metadata: {snap}")
+
+    # Step 5: Verify active backing chain & unlink only verified-unreferenced overlay files
+    post_commit_disks = _list_active_disks(vm_name, host)
+    referenced = _collect_backing_chain_paths(post_commit_disks, host)
+    unlinked_files: list[str] = []
+    for cand_path in candidate_overlays:
+        if not cand_path or cand_path in referenced or os.path.basename(cand_path) in protected_basenames:
+            continue
+        rc_rm, out_rm, _ = run_cmd_status(
+            ["sudo", "bash", "-c", f"if [ -e {shlex.quote(cand_path)} ]; then rm -f -- {shlex.quote(cand_path)} && echo REMOVED; fi"],
+            host=host,
+        )
+        if rc_rm == 0 and "REMOVED" in out_rm:
+            unlinked_files.append(cand_path)
+            print(f"    [✓] Unlinked unreferenced overlay: {cand_path}")
+
+    # Step 6: Optionally create one fresh baseline snapshot on top of the flattened base disk
+    created_snap = ""
+    if new_snap:
+        snap_desc = f"AirlockVM flattened baseline snapshot '{new_snap}'"
+        rc_new, out_new, err_new = run_cmd_status(
+            [
+                "sudo", "virsh", "snapshot-create-as",
+                "--domain", vm_name,
+                "--name", new_snap,
+                "--disk-only",
+                "--description", snap_desc,
+            ],
+            host=host,
+        )
+        if rc_new != 0:
+            print(f"[-] Error creating fresh baseline snapshot '{new_snap}': {err_new or out_new}", file=sys.stderr)
+            return 1
+        created_snap = new_snap
+        print(f"    [✓] Created fresh baseline snapshot '{new_snap}'.")
+
+    # Step 7: Refresh vm.yaml disk sources (and snapshot_base_name if a new baseline was created)
+    final_disks = _list_active_disks(vm_name, host)
+    rc_rem, rem_out, _ = run_cmd_status(["sudo", "virsh", "snapshot-list", vm_name, "--name"], host=host)
+    remaining_snaps = [ln.strip() for ln in rem_out.splitlines() if ln.strip()] if rc_rem == 0 else []
+    vm_yaml_updated = _refresh_vm_yaml_disks(config_path, final_disks, new_baseline_name=created_snap)
+    if vm_yaml_updated:
+        print("    [✓] Updated vm.yaml disk sources and baseline metadata.")
+
+    print(
+        f"[✓] Flattened '{vm_name}': removed {len(removed_snapshots)} snapshot(s), "
+        f"unlinked {len(unlinked_files)} overlay(s), remaining snapshots: {len(remaining_snaps)}."
+    )
+    payload = {
+        "changed": True,
+        "removed_snapshots": removed_snapshots,
+        "unlinked_files": unlinked_files,
+        "active_disks": final_disks,
+        "new_snapshot": created_snap,
+        "remaining_snapshots": remaining_snaps,
+        "vm_yaml_updated": vm_yaml_updated,
+        "dry_run": False,
+    }
+    print(f"AIRLOCK_SNAPSHOT_FLATTEN_JSON:{json.dumps(payload)}")
     return 0
 
 
@@ -1588,6 +1831,7 @@ def main():
     parser.add_argument("--snapshot", nargs="?", const="default", help="Create a snapshot (optional snapshot name)")
     parser.add_argument("--rollback", nargs="?", const="default", help="Revert to baseline or named snapshot")
     parser.add_argument("--delete-snapshot", type=str, metavar="SNAPSHOT_NAME", help="Safely delete a named external disk snapshot (requires --force for baseline snapshot)")
+    parser.add_argument("--flatten-snapshots", nargs="?", const="", metavar="NEW_BASELINE_NAME", help="Consolidate external snapshot chain into VM base disk, remove old overlays/metadata, and optionally create a fresh baseline snapshot (requires --force)")
     parser.add_argument("-y", "--yes", action="store_true", help="Auto-confirm deployment without interactive prompt")
     parser.add_argument("--vm", type=str, help="Target VM domain name in inventory (e.g. airlock-vm)")
     parser.add_argument("--config", type=Path, default=None, help="Path to VM specification YAML (default: auto-detected from inventory)")
@@ -1680,6 +1924,17 @@ def main():
                 params,
                 host,
                 snapshot_name=args.delete_snapshot,
+                force=args.force,
+                dry_run=args.dry_run,
+                config_path=config_path,
+            )
+        )
+    if args.flatten_snapshots is not None:
+        sys.exit(
+            execute_snapshot_flatten(
+                params,
+                host,
+                snapshot_name=args.flatten_snapshots,
                 force=args.force,
                 dry_run=args.dry_run,
                 config_path=config_path,

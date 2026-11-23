@@ -1491,6 +1491,159 @@ class TestMitigationsUnit(unittest.TestCase):
         self.assertEqual(rc_cli, 0)
         mock_cli_snap.assert_called_once_with("snap-vm", action="delete", snapshot_name="snap-1", force=True, dry_run=True)
 
+    def test_snapshot_flatten_noop_dry_run_force_golden_protection_and_cli(self):
+        import json
+        from airlock.mcp.server import airlock_snapshot
+
+        deploy_mod = _load_module(
+            "deploy_vm_snap_flatten_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py",
+        )
+        params = {"VM_NAME": "flat-vm", "SNAPSHOT_BASE_NAME": "snapshot-base-clean"}
+
+        # 1. Early no-op when VM has no snapshots and no overlays above VM base disk
+        def fake_noop(cmd, host=None):
+            if cmd[:3] == ["sudo", "virsh", "snapshot-list"]:
+                return 0, "", ""
+            if cmd[:3] == ["sudo", "virsh", "domblklist"]:
+                return 0, " Type Device Target Source\n-----\n file disk vda /var/lib/libvirt/images/flat-vm.qcow2\n", ""
+            if cmd[:3] == ["sudo", "qemu-img", "info"]:
+                return 0, "image: /var/lib/libvirt/images/flat-vm.qcow2\nimage: /var/lib/libvirt/images/airlock-golden-ubuntu-24.04.qcow2\n", ""
+            return 0, "", ""
+
+        buf_noop = io.StringIO()
+        with patch.object(deploy_mod, "run_cmd_status", side_effect=fake_noop), redirect_stdout(buf_noop):
+            rc_noop = deploy_mod.execute_snapshot_flatten(params, "localhost")
+        self.assertEqual(rc_noop, 0)
+        marker = "AIRLOCK_SNAPSHOT_FLATTEN_JSON:"
+        noop_payload = json.loads(next(ln for ln in buf_noop.getvalue().splitlines() if ln.startswith(marker))[len(marker):])
+        self.assertFalse(noop_payload["changed"])
+
+        # 2. Full 3-layer chain: dry-run, force=False rejection, and force=True execution
+        chain_3 = (
+            "image: /var/lib/libvirt/images/flat-vm.snap-2\n"
+            "image: /var/lib/libvirt/images/flat-vm.snap-1\n"
+            "image: /var/lib/libvirt/images/flat-vm.snapshot-base-clean\n"
+            "image: /var/lib/libvirt/images/flat-vm.qcow2\n"
+            "image: /var/lib/libvirt/images/airlock-golden-ubuntu-24.04.qcow2\n"
+        )
+
+        def fake_inspect(cmd, host=None):
+            if cmd[:3] == ["sudo", "virsh", "snapshot-list"]:
+                return 0, "snapshot-base-clean\nsnap-1\nsnap-2\n", ""
+            if cmd[:3] == ["sudo", "virsh", "domblklist"]:
+                return 0, " Type Device Target Source\n-----\n file disk vda /var/lib/libvirt/images/flat-vm.snap-2\n", ""
+            if cmd[:3] == ["sudo", "qemu-img", "info"]:
+                return 0, chain_3, ""
+            if cmd[:3] == ["sudo", "virsh", "snapshot-dumpxml"]:
+                return 0, "<domainsnapshot><disks/></domainsnapshot>", ""
+            return 0, "", ""
+
+        # 2a. dry_run=True succeeds without force and emits plan stopping at flat-vm.qcow2 (NOT golden image)
+        buf_dry = io.StringIO()
+        with patch.object(deploy_mod, "run_cmd_status", side_effect=fake_inspect), redirect_stdout(buf_dry):
+            rc_dry = deploy_mod.execute_snapshot_flatten(params, "localhost", snapshot_name="snapshot-base-clean", dry_run=True)
+        self.assertEqual(rc_dry, 0)
+        self.assertIn("--base /var/lib/libvirt/images/flat-vm.qcow2 --active --pivot --wait", buf_dry.getvalue())
+        self.assertNotIn("--base /var/lib/libvirt/images/airlock-golden", buf_dry.getvalue())
+
+        # 2b. force=False (non-dry-run) refuses to discard rollback points
+        with patch.object(deploy_mod, "run_cmd_status", side_effect=fake_inspect):
+            rc_noforce = deploy_mod.execute_snapshot_flatten(params, "localhost", force=False, dry_run=False)
+        self.assertEqual(rc_noforce, 1)
+
+        # 2c. force=True commits into flat-vm.qcow2, deletes metadata, unlinks 3 overlays, creates fresh baseline, syncs vm.yaml
+        with tempfile.TemporaryDirectory() as tmpdir:
+            vm_yaml = Path(tmpdir) / "vm.yaml"
+            vm_yaml.write_text(
+                yaml.safe_dump({
+                    "vm": {
+                        "name": "flat-vm",
+                        "host": "localhost",
+                        "disks": [{"device": "disk", "target": "vda", "bus": "virtio", "format": "qcow2", "source": "/var/lib/libvirt/images/flat-vm.snap-2"}],
+                        "blueprint": {"snapshot_base_name": "snapshot-base-clean"},
+                    }
+                }),
+                encoding="utf-8",
+            )
+            recorded: list[list[str]] = []
+            state_flags = {"committed": False, "created_new": False}
+
+            def fake_flatten_exec(cmd, host=None):
+                recorded.append(list(cmd))
+                if cmd[:3] == ["sudo", "virsh", "snapshot-list"]:
+                    if state_flags["created_new"]:
+                        return 0, "snapshot-python314-uv\n", ""
+                    return 0, "snapshot-base-clean\nsnap-1\nsnap-2\n", ""
+                if cmd[:3] == ["sudo", "virsh", "domblklist"]:
+                    if state_flags["created_new"]:
+                        return 0, " Type Device Target Source\n-----\n file disk vda /var/lib/libvirt/images/flat-vm.snapshot-python314-uv\n", ""
+                    if state_flags["committed"]:
+                        return 0, " Type Device Target Source\n-----\n file disk vda /var/lib/libvirt/images/flat-vm.qcow2\n", ""
+                    return 0, " Type Device Target Source\n-----\n file disk vda /var/lib/libvirt/images/flat-vm.snap-2\n", ""
+                if cmd[:3] == ["sudo", "qemu-img", "info"]:
+                    if state_flags["committed"]:
+                        return 0, "image: /var/lib/libvirt/images/flat-vm.qcow2\nimage: /var/lib/libvirt/images/airlock-golden-ubuntu-24.04.qcow2\n", ""
+                    return 0, chain_3, ""
+                if cmd[:3] == ["sudo", "virsh", "snapshot-dumpxml"]:
+                    return 0, "<domainsnapshot><disks/></domainsnapshot>", ""
+                if cmd[:3] == ["sudo", "virsh", "dominfo"]:
+                    return 0, "State:          running\n", ""
+                if cmd[:3] == ["sudo", "virsh", "blockcommit"]:
+                    state_flags["committed"] = True
+                    return 0, "Successfully pivoted", ""
+                if cmd[:3] == ["sudo", "virsh", "snapshot-delete"]:
+                    return 0, "Deleted", ""
+                if cmd[:3] == ["sudo", "bash", "-c"]:
+                    return 0, "REMOVED", ""
+                if cmd[:3] == ["sudo", "virsh", "snapshot-create-as"]:
+                    state_flags["created_new"] = True
+                    return 0, "Domain snapshot snapshot-python314-uv created", ""
+                return 0, "", ""
+
+            buf_exec = io.StringIO()
+            with patch.object(deploy_mod, "run_cmd_status", side_effect=fake_flatten_exec), redirect_stdout(buf_exec):
+                rc_exec = deploy_mod.execute_snapshot_flatten(
+                    params, "localhost", snapshot_name="snapshot-python314-uv", force=True, config_path=vm_yaml
+                )
+            self.assertEqual(rc_exec, 0)
+            exec_payload = json.loads(next(ln for ln in buf_exec.getvalue().splitlines() if ln.startswith(marker))[len(marker):])
+            self.assertTrue(exec_payload["changed"])
+            self.assertEqual(len(exec_payload["removed_snapshots"]), 3)
+            self.assertEqual(len(exec_payload["unlinked_files"]), 3)
+            self.assertEqual(exec_payload["new_snapshot"], "snapshot-python314-uv")
+            self.assertEqual(exec_payload["remaining_snapshots"], ["snapshot-python314-uv"])
+            self.assertTrue(exec_payload["vm_yaml_updated"])
+
+            # Verify blockcommit explicitly targeted --base /var/lib/libvirt/images/flat-vm.qcow2
+            bc_cmds = [c for c in recorded if c[:3] == ["sudo", "virsh", "blockcommit"]]
+            self.assertEqual(len(bc_cmds), 1)
+            self.assertIn("--base", bc_cmds[0])
+            self.assertIn("/var/lib/libvirt/images/flat-vm.qcow2", bc_cmds[0])
+
+            # Verify vm.yaml updated both disk source and snapshot_base_name
+            reloaded = yaml.safe_load(vm_yaml.read_text(encoding="utf-8"))
+            self.assertEqual(reloaded["vm"]["disks"][0]["source"], "/var/lib/libvirt/images/flat-vm.snapshot-python314-uv")
+            self.assertEqual(reloaded["vm"]["blueprint"]["snapshot_base_name"], "snapshot-python314-uv")
+
+        # 3. MCP airlock_snapshot(action="flatten") & CLI `airlock snapshot flat-vm flatten`
+        mock_out = 'AIRLOCK_SNAPSHOT_FLATTEN_JSON:{"changed": true, "removed_snapshots": ["snap-1"], "unlinked_files": ["/var/lib/libvirt/images/flat-vm.snap-1"], "active_disks": [], "new_snapshot": "snapshot-base-clean", "remaining_snapshots": ["snapshot-base-clean"], "vm_yaml_updated": true, "dry_run": false}'
+        with patch("airlock.mcp.server._run_command", return_value={"success": True, "returncode": 0, "stdout": mock_out, "stderr": ""}) as mock_run:
+            res_mcp = airlock_snapshot("flat-vm", action="flatten", snapshot_name="snapshot-base-clean", force=True)
+        self.assertTrue(res_mcp["success"])
+        self.assertEqual(res_mcp["new_snapshot"], "snapshot-base-clean")
+        self.assertEqual(res_mcp["removed_snapshots"], ["snap-1"])
+        called = mock_run.call_args[0][0]
+        self.assertIn("--flatten-snapshots", called)
+        self.assertIn("snapshot-base-clean", called)
+        self.assertIn("--force", called)
+
+        with patch("airlock.cli.airlock_snapshot", return_value={"success": True, "stdout": "flattened"}) as mock_cli_flat, \
+             redirect_stdout(io.StringIO()):
+            rc_cli = cli.main(["snapshot", "flat-vm", "flatten", "snapshot-base-clean", "--force", "--dry-run"])
+        self.assertEqual(rc_cli, 0)
+        mock_cli_flat.assert_called_once_with("flat-vm", action="flatten", snapshot_name="snapshot-base-clean", force=True, dry_run=True)
+
 
 if __name__ == "__main__":
     unittest.main()

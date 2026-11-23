@@ -1197,13 +1197,13 @@ def airlock_snapshot(
     force: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Manages disk-only snapshots for instant clean-slate rollbacks and safe backing-chain pruning.
+    """Manages disk-only snapshots for instant clean-slate rollbacks, safe pruning, and backing-chain flattening.
 
     Args:
         vm_name: Target VM domain name.
-        action: Snapshot action ('create', 'revert', 'list', 'delete').
-        snapshot_name: Name of the snapshot (required for 'delete'; optional for 'create'/'revert', defaulting to baseline).
-        force: When True with action='delete', permits deleting the protected baseline snapshot (e.g. snapshot-base-clean).
+        action: Snapshot action ('create', 'revert', 'list', 'delete', 'flatten').
+        snapshot_name: Name of the snapshot (required for 'delete'; optional fresh baseline name for 'flatten'; optional for 'create'/'revert').
+        force: Required for 'flatten' (when not dry_run) and for deleting the protected baseline snapshot.
         dry_run: When True, previews the snapshot operation without modifying the hypervisor.
     """
     try:
@@ -1248,20 +1248,31 @@ def airlock_snapshot(
             cmd.append("--force")
         if dry_run:
             cmd.append("--dry-run")
+    elif action == "flatten":
+        cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--vm", safe_vm, "--flatten-snapshots"]
+        if snapshot_name and snapshot_name.strip():
+            try:
+                cmd.append(validate_identifier(snapshot_name, "snapshot name"))
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
+        if force:
+            cmd.append("--force")
+        if dry_run:
+            cmd.append("--dry-run")
     else:
         return {
             "success": False,
-            "error": f"Invalid action '{action}'. Must be 'create', 'revert', 'list', or 'delete'.",
+            "error": f"Invalid action '{action}'. Must be 'create', 'revert', 'list', 'delete', or 'flatten'.",
         }
 
-    res = _run_command(cmd, timeout=180 if action == "delete" else 60)
+    res = _run_command(cmd, timeout=300 if action == "flatten" else (180 if action == "delete" else 60))
     res["vm_name"] = safe_vm
     res["action"] = action
 
-    # Parse structured snapshot-delete metadata if present
-    if action == "delete" and res.get("stdout"):
+    # Parse structured snapshot metadata if present
+    if action in ("delete", "flatten") and res.get("stdout"):
         import json as _json
-        marker = "AIRLOCK_SNAPSHOT_DELETE_JSON:"
+        marker = "AIRLOCK_SNAPSHOT_DELETE_JSON:" if action == "delete" else "AIRLOCK_SNAPSHOT_FLATTEN_JSON:"
         for line in res["stdout"].splitlines():
             if line.startswith(marker):
                 try:
