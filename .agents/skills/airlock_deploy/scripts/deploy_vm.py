@@ -485,19 +485,35 @@ def bake_golden_image(
 
     base_img = resolve_base_cloud_image(host, storage_dir, dry_run=dry_run)
     pkg_csv = ",".join(GOLDEN_PACKAGES)
+    pkg_args = " ".join(shlex.quote(p) for p in GOLDEN_PACKAGES)
 
     rootless = is_rootless_host(host)
     sudo_p = "" if rootless else "sudo "
     chown_step = "" if rootless else f"sudo chown libvirt-qemu:kvm {shlex.quote(tmp_path)} || true; "
+    guest_bake_cmd = (
+        "set -eu; "
+        'if ! ip -4 addr show eth0 2>/dev/null | grep -q "inet "; then '
+        "ip link set eth0 up && ip addr add 169.254.2.15/16 dev eth0 && ip route add default via 169.254.2.2; "
+        "fi; "
+        'if [ ! -s /etc/resolv.conf ]; then rm -f /etc/resolv.conf && printf "nameserver 169.254.2.3\\n" > /etc/resolv.conf; fi; '
+        "export DEBIAN_FRONTEND=noninteractive; "
+        "apt-get update -qq; "
+        "apt-get upgrade -y -qq -o Dpkg::Options::=--force-confnew; "
+        "apt-get clean; "
+        f"apt-get install -y -qq -o Dpkg::Options::=--force-confnew {pkg_args}; "
+        "systemctl enable docker qemu-guest-agent; "
+        "apt-get clean; "
+        "if [ -d /run/systemd/resolve ] || command -v resolvectl >/dev/null 2>&1; then "
+        "ln -sf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf; "
+        "fi; "
+        "cloud-init clean --logs || true"
+    )
     bake_script = (
         f"set -euo pipefail; "
         f"{sudo_p}rm -f {shlex.quote(tmp_path)}; "
         f"{sudo_p}cp {shlex.quote(base_img)} {shlex.quote(tmp_path)}; "
-        f"{sudo_p}virt-customize -a {shlex.quote(tmp_path)} "
-        f"--update "
-        f"--install {shlex.quote(pkg_csv)} "
-        f"--run-command 'systemctl enable docker qemu-guest-agent' "
-        f"--run-command 'cloud-init clean --logs || true' "
+        f"{sudo_p}LIBGUESTFS_BACKEND=direct virt-customize --network -a {shlex.quote(tmp_path)} "
+        f"--run-command {shlex.quote(guest_bake_cmd)} "
         f"--truncate /etc/machine-id; "
         f"{chown_step}"
         f"{sudo_p}chmod 664 {shlex.quote(tmp_path)} || true; "

@@ -9,13 +9,34 @@ from __future__ import annotations
 import ipaddress
 from pathlib import Path
 import random
+import shlex
 from typing import Any
 import yaml
 
 from airlock.inventory import find_vmhost_yaml, get_inventory_search_dirs, get_primary_inventory_dir
+from airlock.transport import run_host_cmd
 
 AIRLOCK_ROOT = Path(__file__).resolve().parents[2]
 INVENTORY_DIR = get_primary_inventory_dir()
+
+
+def get_live_dhcp_leases(vmhost: str, network_name: str = "default") -> tuple[set[str], set[str]]:
+    """Queries live libvirt DHCP leases on the hypervisor to avoid reusing recently leased IPs/MACs."""
+    q_net = shlex.quote(network_name)
+    cmd = f"virsh -c qemu:///system net-dhcp-leases {q_net} 2>/dev/null || sudo -n virsh net-dhcp-leases {q_net} 2>/dev/null"
+    rc, out, _ = run_host_cmd(vmhost, cmd, timeout=4)
+    leased_ips: set[str] = set()
+    leased_macs: set[str] = set()
+    if rc != 0 or not out:
+        return leased_ips, leased_macs
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and ":" in parts[2]:
+            leased_macs.add(parts[2].strip().lower())
+            ip_val = parts[4].split("/")[0].strip()
+            if ip_val:
+                leased_ips.add(ip_val)
+    return leased_ips, leased_macs
 
 
 def allocate_vm_network(
@@ -78,6 +99,11 @@ def allocate_vm_network(
                 used_ips.add(str(res["ip"]).strip())
             if res.get("mac"):
                 used_macs.add(str(res["mac"]).strip().lower())
+
+    # Also avoid active live DHCP leases on the hypervisor (prevents dnsmasq rejecting static IPs still leased to purged MACs)
+    live_ips, live_macs = get_live_dhcp_leases(vmhost, network_name)
+    used_ips.update(live_ips)
+    used_macs.update(live_macs)
 
     # Search for next available IP prioritizing high static range (.230-.253 within the subnet)
     allocated_ip = None

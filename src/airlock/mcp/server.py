@@ -1338,7 +1338,7 @@ def airlock_bake_image(
     if dry_run:
         cmd.append("--dry-run")
 
-    res = _run_command(cmd, timeout=600)
+    res = _run_command(cmd, timeout=1800)
     res["host"] = vmhost
     res["dry_run"] = dry_run
     return res

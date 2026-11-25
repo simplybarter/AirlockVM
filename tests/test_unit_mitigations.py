@@ -213,9 +213,11 @@ class TestMitigationsUnit(unittest.TestCase):
             old_env = os.environ.get("AIRLOCK_INVENTORY_DIR")
             os.environ["AIRLOCK_INVENTORY_DIR"] = str(inv)
             try:
-                res = allocate_vm_network("customhost")
+                with patch("airlock.network.get_live_dhcp_leases", return_value=({"10.42.0.230"}, {"52:54:00:00:00:01"})):
+                    res = allocate_vm_network("customhost")
                 self.assertTrue(res["success"])
                 self.assertTrue(res["allocated_ip"].startswith("10.42.0."))
+                self.assertNotEqual(res["allocated_ip"], "10.42.0.230")
             finally:
                 if old_env is not None:
                     os.environ["AIRLOCK_INVENTORY_DIR"] = old_env
@@ -1790,6 +1792,37 @@ class TestMitigationsUnit(unittest.TestCase):
                 return_value=MagicMock(returncode=0, stdout=f"user airlock\nidentityfile {fake_key}\n", stderr=""),
             ):
                 self.assertEqual(add_mod.resolve_host_ssh_key("rootless-hv"), str(fake_key))
+
+    def test_bake_golden_image_bootstraps_slirp_network_and_restores_resolv_conf(self):
+        deploy_mod = _load_module(
+            "deploy_vm_bake_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py",
+        )
+        captured_cmds: list[list[str]] = []
+
+        def fake_run(cmd, host=None):
+            captured_cmds.append(list(cmd))
+            if cmd[:2] == ["test", "-f"]:
+                # Golden image does not exist yet; base cloud image exists
+                return (1, "", "") if "airlock-golden" in cmd[2] else (0, "", "")
+            if cmd[:2] == ["which", "virt-customize"]:
+                return 0, "/usr/bin/virt-customize", ""
+            return 0, "", ""
+
+        with patch.object(deploy_mod, "is_rootless_host", return_value=True), \
+             patch.object(deploy_mod, "resolve_storage_dir", return_value="/var/lib/libvirt/airlock"), \
+             patch.object(deploy_mod, "run_cmd_status", side_effect=fake_run), \
+             redirect_stdout(io.StringIO()):
+            rc = deploy_mod.bake_golden_image("remotehost")
+
+        self.assertEqual(rc, 0)
+        bake_cmd = next(c[2] for c in captured_cmds if c[:2] == ["bash", "-c"])
+        self.assertNotIn("sudo ", bake_cmd)
+        self.assertIn("LIBGUESTFS_BACKEND=direct virt-customize --network", bake_cmd)
+        self.assertIn("169.254.2.15/16", bake_cmd)
+        self.assertIn("nameserver 169.254.2.3", bake_cmd)
+        self.assertIn("apt-get clean", bake_cmd)
+        self.assertIn("stub-resolv.conf /etc/resolv.conf", bake_cmd)
 
 
 if __name__ == "__main__":
