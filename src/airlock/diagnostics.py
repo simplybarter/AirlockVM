@@ -46,9 +46,9 @@ def diagnose_workload_failure(vm_name: str, app_name: str = "") -> dict[str, Any
     root_cause = "UNKNOWN"
     suggested_action = "Review application logs."
 
-    # 1. Hypervisor domain power state
+    # 1. Hypervisor domain power state (rootless qemu:///system first, fallback to sudo)
     q_vm = shlex.quote(vm_name)
-    rc, dom_state, _ = _ssh_host(vmhost, f"sudo virsh domstate {q_vm} 2>/dev/null")
+    rc, dom_state, _ = _ssh_host(vmhost, f"virsh -c qemu:///system domstate {q_vm} 2>/dev/null || sudo -n virsh domstate {q_vm} 2>/dev/null")
     if rc != 0 or not dom_state:
         findings.append("VM domain is not registered or virsh is inaccessible on hypervisor.")
         root_cause = "DOMAIN_NOT_FOUND"
@@ -60,15 +60,20 @@ def diagnose_workload_failure(vm_name: str, app_name: str = "") -> dict[str, Any
     else:
         findings.append(f"VM domain is active in state '{dom_state}'.")
 
-        # 2. Hypervisor proxy socket unit status
+        # 2. Hypervisor proxy socket unit status (system or user systemd)
         socket_unit = f"{vm_name}-p{int(ext_port)}-proxy.socket"
         q_sock = shlex.quote(socket_unit)
-        rc_sock, sock_out, _ = _ssh_host(vmhost, f"systemctl is-active {q_sock} 2>/dev/null || echo 'inactive'")
+        sock_cmd = (
+            f"if [ \"$(systemctl is-active {q_sock} 2>/dev/null)\" = \"active\" ]; then echo active; "
+            f"elif [ \"$(XDG_RUNTIME_DIR=\"/run/user/$(id -u)\" systemctl --user is-active {q_sock} 2>/dev/null)\" = \"active\" ]; then echo active; "
+            f"else echo inactive; fi"
+        )
+        rc_sock, sock_out, _ = _ssh_host(vmhost, sock_cmd)
         if sock_out != "active":
             findings.append(f"Hypervisor proxy socket unit '{socket_unit}' is '{sock_out}'.")
             if root_cause == "UNKNOWN":
                 root_cause = "PROXY_SOCKET_INACTIVE"
-                suggested_action = f"Restart proxy forwarder: ssh {vmhost} 'sudo systemctl restart {socket_unit}'"
+                suggested_action = f"Restart proxy forwarder on {vmhost} (systemctl restart {socket_unit} or systemctl --user restart {socket_unit})"
         else:
             findings.append(f"Hypervisor proxy socket unit '{socket_unit}' is active.")
 

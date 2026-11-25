@@ -99,10 +99,22 @@ def probe_host(host: str, user: str | None = None, port: int = 22, key: str | No
         "port": port,
     }
 
-    # 1. Connectivity test
+    # 1. Connectivity test & privilege mode detection (sudo vs rootless libvirt)
     rc, out, err = run_cmd(["echo", "connected"], host=host, user=user, port=port, key=key)
     if rc != 0:
         raise ConnectionError(f"Cannot reach host '{host}': {err or 'Connection failed'}")
+
+    rc_sudo, _, _ = run_cmd(["sudo", "-n", "true"], host=host, user=user, port=port, key=key)
+    rc_rootless, _, _ = run_cmd(["virsh", "-c", "qemu:///system", "uri"], host=host, user=user, port=port, key=key)
+    use_rootless = (rc_sudo != 0 and rc_rootless == 0)
+    data["privilege_mode"] = "rootless" if use_rootless else "sudo"
+    virsh_prefix = ["virsh", "-c", "qemu:///system"] if use_rootless else ["sudo", "virsh"]
+    data["virsh_prefix"] = virsh_prefix
+
+    if not data["user"]:
+        _, whoami_out, _ = run_cmd(["whoami"], host=host, user=user, port=port, key=key)
+        if whoami_out:
+            data["user"] = whoami_out.strip()
 
     # 2. Hostname & FQDN
     _, hostname, _ = run_cmd(["hostname", "-s"], host=host, user=user, port=port, key=key)
@@ -216,7 +228,7 @@ def probe_host(host: str, user: str | None = None, port: int = 22, key: str | No
     data["storage_root"] = storage_root
 
     # 7. Libvirt Daemon & Version
-    rc_virsh, virsh_ver, _ = run_cmd(["sudo", "virsh", "version"], host=host, user=user, port=port, key=key)
+    rc_virsh, virsh_ver, _ = run_cmd(virsh_prefix + ["version"], host=host, user=user, port=port, key=key)
     libvirt_info = {
         "status": "active" if rc_virsh == 0 else "inactive",
         "type": "kvm",
@@ -233,7 +245,7 @@ def probe_host(host: str, user: str | None = None, port: int = 22, key: str | No
     data["libvirt"] = libvirt_info
 
     # 8. Storage Pools
-    _, pool_out, _ = run_cmd(["sudo", "virsh", "pool-list", "--all"], host=host, user=user, port=port, key=key)
+    _, pool_out, _ = run_cmd(virsh_prefix + ["pool-list", "--all"], host=host, user=user, port=port, key=key)
     pools = []
     pool_lines = pool_out.splitlines()
     if len(pool_lines) > 2:
@@ -243,7 +255,7 @@ def probe_host(host: str, user: str | None = None, port: int = 22, key: str | No
                 pname = parts[0]
                 pstate = parts[1]
                 # inspect pool path
-                _, px_out, _ = run_cmd(["sudo", "virsh", "pool-dumpxml", pname], host=host, user=user, port=port, key=key)
+                _, px_out, _ = run_cmd(virsh_prefix + ["pool-dumpxml", pname], host=host, user=user, port=port, key=key)
                 ppath = "/var/lib/libvirt/images"
                 path_match = re.search(r"<path>([^<]+)</path>", px_out)
                 if path_match:
@@ -254,7 +266,7 @@ def probe_host(host: str, user: str | None = None, port: int = 22, key: str | No
     data["pools"] = pools
 
     # 9. Libvirt Networks & DHCP
-    _, net_list, _ = run_cmd(["sudo", "virsh", "net-list", "--all"], host=host, user=user, port=port, key=key)
+    _, net_list, _ = run_cmd(virsh_prefix + ["net-list", "--all"], host=host, user=user, port=port, key=key)
     networks = []
     net_names = []
     for line in net_list.splitlines()[2:]:
@@ -267,7 +279,7 @@ def probe_host(host: str, user: str | None = None, port: int = 22, key: str | No
 
     static_leases_by_mac = {}
     for net_name in net_names:
-        _, net_xml, _ = run_cmd(["sudo", "virsh", "net-dumpxml", net_name], host=host, user=user, port=port, key=key)
+        _, net_xml, _ = run_cmd(virsh_prefix + ["net-dumpxml", net_name], host=host, user=user, port=port, key=key)
         net_obj = {
             "name": net_name,
             "bridge": "virbr0",
@@ -299,7 +311,7 @@ def probe_host(host: str, user: str | None = None, port: int = 22, key: str | No
     # Dynamic DHCP leases
     dynamic_leases_by_mac = {}
     for net_name in net_names:
-        _, leases_out, _ = run_cmd(["sudo", "virsh", "net-dhcp-leases", net_name], host=host, user=user, port=port, key=key)
+        _, leases_out, _ = run_cmd(virsh_prefix + ["net-dhcp-leases", net_name], host=host, user=user, port=port, key=key)
         for line in leases_out.splitlines():
             parts = line.split()
             if len(parts) >= 5 and ":" in parts[2]:
@@ -313,7 +325,7 @@ def probe_host(host: str, user: str | None = None, port: int = 22, key: str | No
     data["dynamic_leases"] = dynamic_leases_by_mac
 
     # 10. List All Domains
-    _, dom_list, _ = run_cmd(["sudo", "virsh", "list", "--all"], host=host, user=user, port=port, key=key)
+    _, dom_list, _ = run_cmd(virsh_prefix + ["list", "--all"], host=host, user=user, port=port, key=key)
     domains = []
     lines = dom_list.splitlines()
     if len(lines) > 2:
@@ -433,7 +445,8 @@ def probe_vm_details(
             break
 
     # Get dominfo
-    _, dominfo_out, _ = run_cmd(["sudo", "virsh", "dominfo", vm_name], host=host, user=user, port=port, key=key)
+    virsh_prefix = host_data.get("virsh_prefix", ["sudo", "virsh"])
+    _, dominfo_out, _ = run_cmd(virsh_prefix + ["dominfo", vm_name], host=host, user=user, port=port, key=key)
     for line in dominfo_out.splitlines():
         if line.startswith("UUID:"):
             vm_info["uuid"] = line.split(":", 1)[1].strip()
@@ -451,7 +464,7 @@ def probe_vm_details(
                 vm_info["memory_gb"] = round(vm_info["memory_mib"] / 1024)
 
     # Get dumpxml
-    _, xml_out, _ = run_cmd(["sudo", "virsh", "dumpxml", vm_name], host=host, user=user, port=port, key=key)
+    _, xml_out, _ = run_cmd(virsh_prefix + ["dumpxml", vm_name], host=host, user=user, port=port, key=key)
     if xml_out:
         try:
             root = ET.fromstring(xml_out)
@@ -626,6 +639,7 @@ def render_vmhost_yaml(host_data: dict, vm_records: list[dict], template_path: P
         "SSH_HOST": ssh_host,
         "SSH_PORT": str(ssh_port),
         "SSH_USER": ssh_user,
+        "PRIVILEGE_MODE": host_data.get("privilege_mode", "sudo"),
         "HOSTNAME": host_data["hostname"],
         "FQDN": host_data["fqdn"],
         "OS_DISTRO": host_data["os"]["id"],

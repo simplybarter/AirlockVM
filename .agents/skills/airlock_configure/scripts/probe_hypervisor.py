@@ -89,11 +89,17 @@ def check_hypervisor_capabilities(host: str) -> None:
         )
 
     sudo_ret, _, _ = run_cmd_status(["sudo", "-n", "true"], host=host)
-    if sudo_ret != 0:
-        warnings.append("User does not have passwordless sudo on hypervisor. Administrative commands may prompt for password.")
-        print(f"    [!] Host Connectivity & Sudo: WARNING (passwordless sudo not active)")
+    rootless_ret, _, _ = run_cmd_status(["virsh", "-c", "qemu:///system", "uri"], host=host)
+    use_rootless = (sudo_ret != 0 and rootless_ret == 0)
+    virsh_prefix = ["virsh", "-c", "qemu:///system"] if use_rootless else ["sudo", "virsh"]
+
+    if sudo_ret == 0:
+        print(f"    [✓] Host Connectivity & Sudo: PASS (passwordless sudo)")
+    elif use_rootless:
+        print(f"    [✓] Host Connectivity & Privilege: PASS (rootless libvirt / qemu:///system)")
     else:
-        print(f"    [✓] Host Connectivity & Sudo: PASS")
+        warnings.append("User has neither passwordless sudo nor rootless libvirt (qemu:///system) access.")
+        print(f"    [!] Host Connectivity & Privilege: WARNING (neither passwordless sudo nor rootless libvirt active)")
 
     # 2. Hardware Virtualization Support (/dev/kvm)
     kvm_ret, _, _ = run_cmd_status(["test", "-e", "/dev/kvm"], host=host)
@@ -125,7 +131,7 @@ def check_hypervisor_capabilities(host: str) -> None:
         )
         print(f"    [✗] libvirt Hypervisor Daemon: FAIL ('virsh' command not found)")
     else:
-        uri_ret, uri_out, _ = run_cmd_status(["sudo", "virsh", "uri"], host=host)
+        uri_ret, uri_out, _ = run_cmd_status(virsh_prefix + ["uri"], host=host)
         if uri_ret != 0:
             failures.append(
                 f"libvirt Daemon: 'virsh' is installed but daemon is not responding.\n"
@@ -136,7 +142,7 @@ def check_hypervisor_capabilities(host: str) -> None:
             print(f"    [✓] libvirt Hypervisor Daemon: PASS ({uri_out})")
 
     # 4. Virtual Network & Bridge
-    net_ret, net_out, _ = run_cmd_status(["sudo", "virsh", "net-info", "default"], host=host)
+    net_ret, net_out, _ = run_cmd_status(virsh_prefix + ["net-info", "default"], host=host)
     if net_ret != 0:
         failures.append(
             "Virtual Network: Default libvirt network does not exist.\n"
@@ -170,8 +176,10 @@ def check_hypervisor_capabilities(host: str) -> None:
             f"Host Memory: Host has only {total_ram_mb} MB RAM. Running execution VMs alongside host services may cause high memory pressure."
         )
 
-    # Check disk space in /var/lib/libvirt/images or root /
-    df_ret, df_out, _ = run_cmd_status(["df", "-m", "/var/lib/libvirt/images"], host=host)
+    # Check disk space in /var/lib/libvirt/airlock, /var/lib/libvirt/images, or root /
+    df_ret, df_out, _ = run_cmd_status(["df", "-m", "/var/lib/libvirt/airlock"], host=host)
+    if df_ret != 0:
+        df_ret, df_out, _ = run_cmd_status(["df", "-m", "/var/lib/libvirt/images"], host=host)
     if df_ret != 0:
         df_ret, df_out, _ = run_cmd_status(["df", "-m", "/"], host=host)
 
@@ -370,12 +378,16 @@ def derive_vm_naming(project_name: str, existing_domains: list[str] = None, prox
 
 def parse_libvirt_topology(host: str) -> dict:
     """Probes libvirt network XML, existing domains, and DHCP leases."""
+    sudo_ret, _, _ = run_cmd_status(["sudo", "-n", "true"], host=host)
+    rootless_ret, _, _ = run_cmd_status(["virsh", "-c", "qemu:///system", "uri"], host=host)
+    virsh_prefix = ["virsh", "-c", "qemu:///system"] if (sudo_ret != 0 and rootless_ret == 0) else ["sudo", "virsh"]
+
     # List domains
-    domains_out = run_cmd(["sudo", "virsh", "list", "--all", "--name"], host=host, check=False)
+    domains_out = run_cmd(virsh_prefix + ["list", "--all", "--name"], host=host, check=False)
     existing_domains = [d.strip() for d in domains_out.splitlines() if d.strip()]
 
     # Net dumpxml default
-    net_xml = run_cmd(["sudo", "virsh", "net-dumpxml", "default"], host=host, check=False)
+    net_xml = run_cmd(virsh_prefix + ["net-dumpxml", "default"], host=host, check=False)
 
     bridge = "virbr0"
     bridge_match = re.search(r"<bridge\s+name='([^']+)'", net_xml)
@@ -406,7 +418,7 @@ def parse_libvirt_topology(host: str) -> dict:
         assigned_ips.add(host_match.group(3))
 
     # Also check dynamic DHCP leases
-    leases_out = run_cmd(["sudo", "virsh", "net-dhcp-leases", network_name], host=host, check=False)
+    leases_out = run_cmd(virsh_prefix + ["net-dhcp-leases", network_name], host=host, check=False)
     for line in leases_out.splitlines():
         parts = line.split()
         if len(parts) >= 5 and ":" in parts[2]:

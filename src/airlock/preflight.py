@@ -72,14 +72,29 @@ def validate_deployment_preflight(vm_name: str) -> dict[str, Any]:
     blockers = 0
     warnings = 0
 
-    # 1. Hypervisor Connectivity & Sudo
-    rc, out, err = _ssh_cmd(vmhost, "sudo -n true 2>/dev/null && echo 'SUDO_OK' || echo 'SUDO_FAIL'")
-    hypervisor_reachable = rc == 0 and "SUDO_OK" in out
+    # 1. Hypervisor Connectivity & Privilege Mode (passwordless sudo OR rootless libvirt group)
+    access_cmd = (
+        "if sudo -n true 2>/dev/null; then echo 'SUDO_OK'; "
+        "elif virsh -c qemu:///system uri >/dev/null 2>&1; then echo 'ROOTLESS_OK'; "
+        "else echo 'ACCESS_FAIL'; fi"
+    )
+    rc, out, err = _ssh_cmd(vmhost, access_cmd)
+    is_rootless = rc == 0 and "ROOTLESS_OK" in out
+    hypervisor_reachable = rc == 0 and ("SUDO_OK" in out or is_rootless)
     if hypervisor_reachable:
-        checks["hypervisor_access"] = {"status": "PASS", "message": f"SSH key access and passwordless sudo verified on {vmhost}"}
+        if is_rootless:
+            checks["hypervisor_access"] = {
+                "status": "PASS",
+                "message": f"SSH key access and rootless libvirt (qemu:///system) verified on {vmhost}",
+            }
+        else:
+            checks["hypervisor_access"] = {
+                "status": "PASS",
+                "message": f"SSH key access and passwordless sudo verified on {vmhost}",
+            }
     else:
-        checks["hypervisor_access"] = {"status": "FAIL", "message": f"Sudo or SSH failed on {vmhost}: {err or out}"}
-        remediations.append(f"Configure passwordless sudo for user on hypervisor '{vmhost}'.")
+        checks["hypervisor_access"] = {"status": "FAIL", "message": f"SSH/libvirt/sudo access failed on {vmhost}: {err or out}"}
+        remediations.append(f"Configure rootless libvirt/kvm group membership or passwordless sudo on hypervisor '{vmhost}'.")
         blockers += 1
 
     if not hypervisor_reachable:
@@ -103,7 +118,7 @@ def validate_deployment_preflight(vm_name: str) -> dict[str, Any]:
             blockers += 1
 
         # 3. Libvirt Daemon Active
-        rc, out, err = _ssh_cmd(vmhost, "virsh uri 2>/dev/null")
+        rc, out, err = _ssh_cmd(vmhost, "virsh -c qemu:///system uri 2>/dev/null || sudo -n virsh uri 2>/dev/null")
         if rc == 0 and "qemu" in out:
             checks["libvirt_daemon"] = {"status": "PASS", "message": f"Libvirt daemon active ({out})"}
         else:
@@ -146,7 +161,7 @@ def validate_deployment_preflight(vm_name: str) -> dict[str, Any]:
 
         # 6. Storage Pool Free Headroom
         storage_cmd = (
-            "for d in /var/lib/libvirt/images /var/lib/libvirt /; do "
+            "for d in /var/lib/libvirt/airlock /var/lib/libvirt/images /var/lib/libvirt /; do "
             "if [ -d \"$d\" ]; then df -BG \"$d\" 2>/dev/null | tail -1 | awk '{print $4}' | tr -d 'G'; break; fi; done"
         )
         rc, out, err = _ssh_cmd(vmhost, storage_cmd)
@@ -193,10 +208,12 @@ def validate_deployment_preflight(vm_name: str) -> dict[str, Any]:
 
         # 8. Base Cloud Image / Golden Image Cached
         check_img_cmd = (
-            "if [ -f /var/lib/libvirt/images/airlock-golden-ubuntu-24.04.qcow2 ]; then echo 'GOLDEN'; exit 0; fi; "
-            "for img in /var/lib/libvirt/images/ubuntu-24.04-minimal-cloudimg.img "
-            "/var/lib/libvirt/images/noble-server-cloudimg-amd64.img; do "
-            "[ -f \"$img\" ] && echo 'CACHED' && exit 0; done; echo 'MISSING'"
+            "for dir in /var/lib/libvirt/airlock /var/lib/libvirt/images; do "
+            "if [ -f \"$dir/airlock-golden-ubuntu-24.04.qcow2\" ]; then echo 'GOLDEN'; exit 0; fi; "
+            "done; "
+            "for dir in /var/lib/libvirt/airlock /var/lib/libvirt/images; do "
+            "for img in \"$dir/ubuntu-24.04-minimal-cloudimg.img\" \"$dir/noble-server-cloudimg-amd64.img\"; do "
+            "[ -f \"$img\" ] && echo 'CACHED' && exit 0; done; done; echo 'MISSING'"
         )
         rc, out, err = _ssh_cmd(vmhost, check_img_cmd)
         if rc == 0 and "GOLDEN" in out:

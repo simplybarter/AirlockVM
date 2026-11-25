@@ -1664,6 +1664,117 @@ class TestMitigationsUnit(unittest.TestCase):
         self.assertEqual(rc_cli, 0)
         mock_cli_flat.assert_called_once_with("flat-vm", action="flatten", snapshot_name="snapshot-base-clean", force=True, dry_run=True)
 
+    def test_rootless_hypervisor_mode_deploy_preflight_and_mcp(self):
+        from airlock.mcp.server import airlock_create_vm
+
+        deploy_mod = _load_module(
+            "deploy_vm_rootless_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py",
+        )
+        deploy_mod._ROOTLESS_CACHE.clear()
+
+        # 1. is_rootless_host detects rootless when sudo -n fails and virsh -c qemu:///system succeeds
+        def fake_rootless_probe(cmd, host=None):
+            if cmd == ["sudo", "-n", "true"]:
+                return 1, "", "sudo: a password is required"
+            if cmd == ["virsh", "-c", "qemu:///system", "uri"]:
+                return 0, "qemu:///system", ""
+            return 0, "", ""
+
+        with patch.object(deploy_mod, "run_cmd_status", side_effect=fake_rootless_probe):
+            self.assertTrue(deploy_mod.is_rootless_host("rootless-hv"))
+            self.assertEqual(deploy_mod.virsh_cmd("rootless-hv", "list"), ["virsh", "-c", "qemu:///system", "list"])
+            self.assertEqual(deploy_mod.priv_cmd("rootless-hv", "qemu-img", "info"), ["qemu-img", "info"])
+            self.assertEqual(
+                deploy_mod.virt_install_cmd("rootless-hv", "--name", "demo"),
+                ["virt-install", "--connect", "qemu:///system", "--name", "demo"],
+            )
+
+        # 2. setup_hypervisor_proxy uses ~/.config/systemd/user and systemctl --user in rootless mode
+        captured_scripts: list[str] = []
+
+        def fake_proxy_run(cmd, host=None):
+            if cmd == ["sudo", "-n", "true"]:
+                return 1, "", ""
+            if cmd == ["virsh", "-c", "qemu:///system", "uri"]:
+                return 0, "qemu:///system", ""
+            if cmd[:2] == ["bash", "-c"]:
+                captured_scripts.append(cmd[2])
+                if "systemd-socket-proxyd" in cmd[2]:
+                    return 0, "/usr/lib/systemd/systemd-socket-proxyd", ""
+                return 0, "", ""
+            return 0, "", ""
+
+        with patch.object(deploy_mod, "run_cmd_status", side_effect=fake_proxy_run), redirect_stdout(io.StringIO()):
+            deploy_mod.setup_hypervisor_proxy(
+                {"VM_NAME": "rl-vm", "VM_IP": "192.168.122.240", "PROXY_EXTERNAL_PORT": "8001", "APP_INTERNAL_PORT": "8000", "REPOSITORIES": []},
+                "rootless-hv",
+                dry_run=False,
+            )
+        setup_script = next(s for s in captured_scripts if "systemctl --user" in s)
+        self.assertIn("$HOME/.config/systemd/user/rl-vm-p8001-proxy.socket", setup_script)
+        self.assertNotIn("sudo ", setup_script)
+
+        # 3. preflight passes Gate 1 on ROOTLESS_OK and airlock_create_vm records user-systemd proxy path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            inv_dir = root / "inventory"
+            host_dir = inv_dir / "rootless-hv"
+            host_dir.mkdir(parents=True)
+            (host_dir / "vmhost.yaml").write_text(
+                yaml.safe_dump({
+                    "vmhost": {
+                        "name": "rootless-hv",
+                        "connection": {"type": "ssh", "host": "rootless-hv", "privilege_mode": "rootless"},
+                        "system": {"os": {"pretty_name": "Ubuntu 24.04 LTS"}},
+                        "hardware": {"cpu": {"total_cores": 8, "model": "CPU"}, "memory": {"total_mib": 8192, "total_gb": 8}},
+                        "virtualization": {"networks": [{"name": "default", "bridge": "virbr0", "ip": "192.168.122.1", "netmask": "255.255.255.0"}]},
+                    }
+                }),
+                encoding="utf-8",
+            )
+            app_dir = root / "rl-app"
+            app_dir.mkdir()
+            (app_dir / "pyproject.toml").write_text('[project]\nname = "rl-app"\n', encoding="utf-8")
+
+            old_env = os.environ.get("AIRLOCK_INVENTORY_DIR")
+            os.environ["AIRLOCK_INVENTORY_DIR"] = str(inv_dir)
+            try:
+                with patch("airlock.ports.get_inventory_used_ports", return_value=set()), \
+                     patch("airlock.ports.get_hypervisor_live_ports", return_value=set()):
+                    res_create = airlock_create_vm(local_path=str(app_dir), vmhost="rootless-hv", vm_name="rl-vm", internal_port=8000, external_port=8001)
+                self.assertTrue(res_create["success"], res_create)
+                vdoc = yaml.safe_load((host_dir / "rl-vm" / "vm.yaml").read_text(encoding="utf-8"))
+                self.assertEqual(vdoc["vm"]["blueprint"]["proxy_socket_service"], "~/.config/systemd/user/rl-vm-p8001-proxy.socket")
+
+                def fake_preflight_ssh(host, cmd, timeout=5):
+                    if "ROOTLESS_OK" in cmd:
+                        return 0, "ROOTLESS_OK", ""
+                    if "KVM_OK" in cmd:
+                        return 0, "KVM_OK", ""
+                    if "virsh -c qemu:///system uri" in cmd:
+                        return 0, "qemu:///system", ""
+                    if "SILENT" in cmd:
+                        return 0, "SILENT", ""
+                    if "df -BG" in cmd:
+                        return 0, "100", ""
+                    if "MemAvailable" in cmd:
+                        return 0, "6000", ""
+                    if "GOLDEN" in cmd:
+                        return 0, "CACHED", ""
+                    return 0, "", ""
+
+                with patch("airlock.preflight._ssh_cmd", side_effect=fake_preflight_ssh), \
+                     patch("airlock.preflight.get_hypervisor_live_ports", return_value=set()):
+                    pf = validate_deployment_preflight("rl-vm")
+                self.assertEqual(pf["verdict"], "READY_TO_DEPLOY")
+                self.assertIn("rootless libvirt", pf["checks"]["hypervisor_access"]["message"])
+            finally:
+                if old_env is not None:
+                    os.environ["AIRLOCK_INVENTORY_DIR"] = old_env
+                else:
+                    os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
+
 
 if __name__ == "__main__":
     unittest.main()

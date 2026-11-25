@@ -195,6 +195,8 @@ def load_from_inventory(host: str, repo_root: Path, target_vm: str | None = None
         if not proposed_ip:
             proposed_ip = next((ip for ip in all_hosts if ip not in assigned_ips), f"{subnet_base}")
 
+        priv_mode = str(vmhost.get("connection", {}).get("privilege_mode", "")).strip().lower()
+        proxy_dir = "~/.config/systemd/user" if priv_mode == "rootless" else "/etc/systemd/system"
         dev_host = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip() or "workstation"
         data = {
             "PROJECT_NAME": DEFAULT_PROJECT_NAME,
@@ -223,7 +225,7 @@ def load_from_inventory(host: str, repo_root: Path, target_vm: str | None = None
             "SSH_KEY_PATH": f"~/.ssh/{proj_slug.replace('-', '')}_vm_ed25519",
             "APP_INTERNAL_PORT": "3000",
             "PROXY_EXTERNAL_PORT": "3001",
-            "PROXY_SOCKET_SERVICE": f"/etc/systemd/system/{cand_vm_name}-p3001-proxy.socket",
+            "PROXY_SOCKET_SERVICE": f"{proxy_dir}/{cand_vm_name}-p3001-proxy.socket",
             "REMOTE_CODE_DIR": f"~/{DEFAULT_PROJECT_NAME}/",
             "SNAPSHOT_BASE_NAME": "snapshot-base-clean",
             "SNAPSHOT_BASE_DESC": "Pristine base setup with Docker and Python",

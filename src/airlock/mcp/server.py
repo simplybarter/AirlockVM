@@ -90,6 +90,17 @@ def _find_vm_yaml(vm_name: str) -> tuple[Path | None, dict[str, Any] | None]:
     return find_vm_yaml(vm_name)
 
 
+def _proxy_socket_path_for_host(vmhost: str, vm_name: str, ext_port: int) -> str:
+    """Returns ~/.config/systemd/user/... for rootless hosts, else /etc/systemd/system/..."""
+    _, hdoc = find_vmhost_yaml(vmhost)
+    priv_mode = ""
+    if hdoc:
+        priv_mode = str((hdoc.get("vmhost", {}).get("connection", {}) or {}).get("privilege_mode", "")).strip().lower()
+    if priv_mode == "rootless":
+        return f"~/.config/systemd/user/{vm_name}-p{ext_port}-proxy.socket"
+    return f"/etc/systemd/system/{vm_name}-p{ext_port}-proxy.socket"
+
+
 # ==============================================================================
 # Core Observability & Inspection Tools
 # ==============================================================================
@@ -585,7 +596,7 @@ def airlock_create_vm(
     yaml_path = vm_dir / "vm.yaml"
     runbook_path = vm_dir / "VM.md"
 
-    proxy_socket_service = f"/etc/systemd/system/{vm_name}-p{allocated_port}-proxy.socket"
+    proxy_socket_service = _proxy_socket_path_for_host(vmhost, vm_name, allocated_port)
     memory_gb = max(1, memory_mib // 1024)
 
     # Build SSOT YAML structure
@@ -808,7 +819,7 @@ def airlock_update_vm(
             target_repo["internal_port"] = internal_port
 
     if external_port > 0:
-        new_socket = f"/etc/systemd/system/{vm_name}-p{external_port}-proxy.socket"
+        new_socket = _proxy_socket_path_for_host(vmhost, vm_name, external_port)
         if bp.get("proxy_external_port") != external_port:
             changes["proxy_external_port"] = {"old": bp.get("proxy_external_port"), "new": external_port}
             bp["proxy_external_port"] = external_port

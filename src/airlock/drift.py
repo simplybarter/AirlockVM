@@ -47,9 +47,9 @@ def audit_vm_drift(vm_name: str) -> dict[str, Any]:
     bp = vm_data.get("blueprint", {})
     expected_proxy_port = bp.get("proxy_external_port")
 
-    # 1. Query live libvirt domain
+    # 1. Query live libvirt domain (rootless qemu:///system first, fallback to sudo)
     q_vm = shlex.quote(vm_name)
-    rc, xml_str, _ = _ssh_cmd(vmhost, f"sudo virsh dumpxml {q_vm} 2>/dev/null")
+    rc, xml_str, _ = _ssh_cmd(vmhost, f"virsh -c qemu:///system dumpxml {q_vm} 2>/dev/null || sudo -n virsh dumpxml {q_vm} 2>/dev/null")
     domain_defined = rc == 0 and bool(xml_str.strip())
 
     drift_items: list[dict[str, Any]] = []
@@ -92,7 +92,7 @@ def audit_vm_drift(vm_name: str) -> dict[str, Any]:
                 })
 
             # Check live execution state
-            rc_st, live_state, _ = _ssh_cmd(vmhost, f"sudo virsh domstate {q_vm} 2>/dev/null")
+            rc_st, live_state, _ = _ssh_cmd(vmhost, f"virsh -c qemu:///system domstate {q_vm} 2>/dev/null || sudo -n virsh domstate {q_vm} 2>/dev/null")
             if rc_st == 0 and live_state:
                 norm_live = live_state.lower().strip()
                 norm_exp = expected_state.lower().strip()
@@ -115,10 +115,16 @@ def audit_vm_drift(vm_name: str) -> dict[str, Any]:
                 "message": f"Error parsing domain XML: {e}",
             })
 
-    # 2. Check hypervisor systemd proxy socket state
+    # 2. Check hypervisor systemd proxy socket state (system or user systemd)
     if expected_proxy_port:
         socket_unit = f"{vm_name}-p{int(expected_proxy_port)}-proxy.socket"
-        rc_sock, sock_status, _ = _ssh_cmd(vmhost, f"systemctl is-active {shlex.quote(socket_unit)} 2>/dev/null || echo 'inactive'")
+        q_sock = shlex.quote(socket_unit)
+        sock_cmd = (
+            f"if [ \"$(systemctl is-active {q_sock} 2>/dev/null)\" = \"active\" ]; then echo active; "
+            f"elif [ \"$(XDG_RUNTIME_DIR=\"/run/user/$(id -u)\" systemctl --user is-active {q_sock} 2>/dev/null)\" = \"active\" ]; then echo active; "
+            f"else echo inactive; fi"
+        )
+        rc_sock, sock_status, _ = _ssh_cmd(vmhost, sock_cmd)
         if sock_status != "active" and expected_state == "running":
             drift_items.append({
                 "category": "proxy",

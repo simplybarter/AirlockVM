@@ -166,6 +166,45 @@ def run_cmd_status(cmd: list[str], host: str | None = None) -> tuple[int, str, s
         return 1, "", str(e)
 
 
+_ROOTLESS_CACHE: dict[str, bool] = {}
+
+
+def is_rootless_host(host: str) -> bool:
+    """Returns True when the hypervisor user operates via rootless libvirt (qemu:///system) without passwordless sudo."""
+    key = host or "localhost"
+    if key in _ROOTLESS_CACHE:
+        return _ROOTLESS_CACHE[key]
+    rc_sudo, _, _ = run_cmd_status(["sudo", "-n", "true"], host=host)
+    if rc_sudo == 0:
+        _ROOTLESS_CACHE[key] = False
+        return False
+    rc_rl, _, _ = run_cmd_status(["virsh", "-c", "qemu:///system", "uri"], host=host)
+    rootless = (rc_rl == 0)
+    _ROOTLESS_CACHE[key] = rootless
+    return rootless
+
+
+def virsh_cmd(host: str, *args: str) -> list[str]:
+    """Builds a virsh command using rootless qemu:///system or sudo depending on host privilege mode."""
+    if is_rootless_host(host):
+        return ["virsh", "-c", "qemu:///system", *args]
+    return ["sudo", "virsh", *args]
+
+
+def priv_cmd(host: str, *args: str) -> list[str]:
+    """Prefixes a hypervisor command with sudo unless the host is operating in rootless mode."""
+    if is_rootless_host(host):
+        return list(args)
+    return ["sudo", *args]
+
+
+def virt_install_cmd(host: str, *args: str) -> list[str]:
+    """Builds a virt-install command using rootless qemu:///system or sudo."""
+    if is_rootless_host(host):
+        return ["virt-install", "--connect", "qemu:///system", *args]
+    return ["sudo", "virt-install", *args]
+
+
 # ==============================================================================
 # Mandatory Pre-requisite Gates
 # ==============================================================================
@@ -346,7 +385,7 @@ Host {params['VM_NAME']}
 
 def check_domain_status(vm_name: str, host: str) -> tuple[bool, str]:
     """Checks whether the domain exists in libvirt and its running state."""
-    ret, out, _ = run_cmd_status(["sudo", "virsh", "dominfo", vm_name], host=host)
+    ret, out, _ = run_cmd_status(virsh_cmd(host, "dominfo", vm_name), host=host)
     if ret != 0:
         return False, "not_found"
 
@@ -356,13 +395,13 @@ def check_domain_status(vm_name: str, host: str) -> tuple[bool, str]:
 
 
 def resolve_storage_dir(host: str) -> str:
-    """Finds or creates an optimal libvirt storage directory on hypervisor."""
-    # Check if pool 'vm' exists
-    ret, out, _ = run_cmd_status(["sudo", "virsh", "pool-dumpxml", "vm"], host=host)
-    if ret == 0:
-        path_match = re.search(r"<path>([^<]+)</path>", out)
-        if path_match:
-            return path_match.group(1).strip()
+    """Finds an optimal libvirt storage directory on hypervisor (preferring 'airlock', then 'vm', then 'default')."""
+    for pool_name in ("airlock", "vm", "default"):
+        ret, out, _ = run_cmd_status(virsh_cmd(host, "pool-dumpxml", pool_name), host=host)
+        if ret == 0:
+            path_match = re.search(r"<path>([^<]+)</path>", out)
+            if path_match:
+                return path_match.group(1).strip()
 
     # Fallback to standard libvirt images path
     return "/var/lib/libvirt/images"
@@ -447,19 +486,22 @@ def bake_golden_image(
     base_img = resolve_base_cloud_image(host, storage_dir, dry_run=dry_run)
     pkg_csv = ",".join(GOLDEN_PACKAGES)
 
+    rootless = is_rootless_host(host)
+    sudo_p = "" if rootless else "sudo "
+    chown_step = "" if rootless else f"sudo chown libvirt-qemu:kvm {shlex.quote(tmp_path)} || true; "
     bake_script = (
         f"set -euo pipefail; "
-        f"sudo rm -f {shlex.quote(tmp_path)}; "
-        f"sudo cp {shlex.quote(base_img)} {shlex.quote(tmp_path)}; "
-        f"sudo virt-customize -a {shlex.quote(tmp_path)} "
+        f"{sudo_p}rm -f {shlex.quote(tmp_path)}; "
+        f"{sudo_p}cp {shlex.quote(base_img)} {shlex.quote(tmp_path)}; "
+        f"{sudo_p}virt-customize -a {shlex.quote(tmp_path)} "
         f"--update "
         f"--install {shlex.quote(pkg_csv)} "
         f"--run-command 'systemctl enable docker qemu-guest-agent' "
         f"--run-command 'cloud-init clean --logs || true' "
         f"--truncate /etc/machine-id; "
-        f"sudo chown libvirt-qemu:kvm {shlex.quote(tmp_path)} || true; "
-        f"sudo chmod 644 {shlex.quote(tmp_path)} || true; "
-        f"sudo mv {shlex.quote(tmp_path)} {shlex.quote(golden_path)}"
+        f"{chown_step}"
+        f"{sudo_p}chmod 664 {shlex.quote(tmp_path)} || true; "
+        f"{sudo_p}mv {shlex.quote(tmp_path)} {shlex.quote(golden_path)}"
     )
 
     if dry_run:
@@ -473,7 +515,7 @@ def bake_golden_image(
     ret, out, err = run_cmd_status(["bash", "-c", bake_script], host=host)
     if ret != 0:
         print(f"[-] Golden image baking failed: {err or out}", file=sys.stderr)
-        run_cmd_status(["sudo", "rm", "-f", tmp_path], host=host)
+        run_cmd_status(priv_cmd(host, "rm", "-f", tmp_path), host=host)
         return 1
 
     print(f"[✓] Golden image successfully baked on {host}: {golden_path}")
@@ -506,7 +548,8 @@ def resolve_base_cloud_image(host: str, target_dir: str, dry_run: bool = False) 
         return dest_img
 
     print(f"    [*] Downloading Ubuntu 24.04 minimal cloud image to {host}...")
-    dl_cmd = f"sudo curl -fsSL -o '{dest_img}' '{url}'"
+    sudo_p = "" if is_rootless_host(host) else "sudo "
+    dl_cmd = f"{sudo_p}curl -fsSL -o {shlex.quote(dest_img)} {shlex.quote(url)}"
     ret, _, err = run_cmd_status(["bash", "-c", dl_cmd], host=host)
     if ret != 0:
         raise RuntimeError(f"Failed to download cloud image: {err}")
@@ -522,7 +565,7 @@ def ensure_static_dhcp(params: dict, host: str, dry_run: bool = False) -> None:
     name = params["VM_NAME"]
 
     print(f"[*] Ensuring static DHCP reservation in libvirt network '{net_name}' on {host}...")
-    ret, out, _ = run_cmd_status(["sudo", "virsh", "net-dumpxml", net_name], host=host)
+    ret, out, _ = run_cmd_status(virsh_cmd(host, "net-dumpxml", net_name), host=host)
     if ret != 0:
         print(f"    [-] Warning: Could not read libvirt network '{net_name}'. Skipping reservation update.")
         return
@@ -533,7 +576,7 @@ def ensure_static_dhcp(params: dict, host: str, dry_run: bool = False) -> None:
 
     print(f"    -> Adding reservation: MAC={mac} -> IP={ip} ({name})")
     xml_snippet = f"<host mac='{mac}' name='{name}' ip='{ip}'/>"
-    update_cmd = ["sudo", "virsh", "net-update", net_name, "add-last", "ip-dhcp-host", xml_snippet, "--live", "--config"]
+    update_cmd = virsh_cmd(host, "net-update", net_name, "add-last", "ip-dhcp-host", xml_snippet, "--live", "--config")
 
     if dry_run:
         print(f"    [PLAN] {' '.join(update_cmd)}")
@@ -597,6 +640,9 @@ runcmd:
         return
 
     # Write files to a temporary location on hypervisor and build ISO
+    rootless = is_rootless_host(host)
+    sudo_p = "" if rootless else "sudo "
+    chown_line = "" if rootless else f"sudo chown libvirt-qemu:kvm '{seed_iso_path}' || true\n"
     build_script = f"""
 set -euo pipefail
 TMP_DIR="$(mktemp -d /tmp/airlock_cloudinit_XXXXXX)"
@@ -619,9 +665,8 @@ ethernets:
     dhcp4: true
 NETCONFIG_EOF
 
-sudo cloud-localds -N "$TMP_DIR/network-config" '{seed_iso_path}' "$TMP_DIR/user-data" "$TMP_DIR/meta-data"
-sudo chown libvirt-qemu:kvm '{seed_iso_path}' || true
-sudo chmod 664 '{seed_iso_path}' || true
+{sudo_p}cloud-localds -N "$TMP_DIR/network-config" '{seed_iso_path}' "$TMP_DIR/user-data" "$TMP_DIR/meta-data"
+{chown_line}{sudo_p}chmod 664 '{seed_iso_path}' || true
 """
     ret, _, err = run_cmd_status(["bash", "-c", build_script], host=host)
     if ret != 0:
@@ -631,8 +676,8 @@ sudo chmod 664 '{seed_iso_path}' || true
 
 def provision_domain(params: dict, disk_path: str, seed_iso_path: str, host: str, dry_run: bool = False) -> None:
     """Executes virt-install to launch the virtual machine."""
-    cmd = [
-        "sudo", "virt-install",
+    cmd = virt_install_cmd(
+        host,
         "--name", params["VM_NAME"],
         "--vcpus", params["VCPU_CORES"],
         "--memory", params["RAM_MIB"],
@@ -645,7 +690,7 @@ def provision_domain(params: dict, disk_path: str, seed_iso_path: str, host: str
         "--graphics", "none",
         "--noautoconsole",
         "--import",
-    ]
+    )
 
     print(f"[*] Provisioning VM domain '{params['VM_NAME']}' on {host} via virt-install...")
     if dry_run:
@@ -683,10 +728,19 @@ def setup_hypervisor_proxy(params: dict, host: str, dry_run: bool = False) -> No
         default_int = str(params.get("APP_INTERNAL_PORT", "3000"))
         port_mappings.append((default_ext, default_int, vm_name))
 
+    rootless = is_rootless_host(host)
     for ext_port, int_port, label in port_mappings:
         unit_name = f"{vm_name}-p{ext_port}-proxy"
-        socket_path = f"/etc/systemd/system/{unit_name}.socket"
-        service_path = f"/etc/systemd/system/{unit_name}.service"
+        if rootless:
+            socket_path = f"$HOME/.config/systemd/user/{unit_name}.socket"
+            service_path = f"$HOME/.config/systemd/user/{unit_name}.service"
+            display_socket = f"~/.config/systemd/user/{unit_name}.socket"
+            display_service = f"~/.config/systemd/user/{unit_name}.service"
+        else:
+            socket_path = f"/etc/systemd/system/{unit_name}.socket"
+            service_path = f"/etc/systemd/system/{unit_name}.service"
+            display_socket = socket_path
+            display_service = service_path
 
         # Determine listen address: if running directly on localhost, bind strictly to 127.0.0.1 (loopback)
         # to prevent exposing the port to the physical LAN. Remote hypervisors bind to 0.0.0.0 so clients can reach it.
@@ -724,12 +778,32 @@ ExecStart={proxyd_bin} {vm_ip}:{int_port}
 """
 
         if dry_run:
-            print(f"    [PLAN] Configure {socket_path} (ListenStream={listen_address}:{ext_port})")
-            print(f"    [PLAN] Configure {service_path}")
-            print(f"    [PLAN] sudo systemctl daemon-reload && sudo systemctl enable --now {unit_name}.socket")
+            print(f"    [PLAN] Configure {display_socket} (ListenStream={listen_address}:{ext_port})")
+            print(f"    [PLAN] Configure {display_service}")
+            if rootless:
+                print(f"    [PLAN] systemctl --user daemon-reload && systemctl --user enable --now {unit_name}.socket")
+            else:
+                print(f"    [PLAN] sudo systemctl daemon-reload && sudo systemctl enable --now {unit_name}.socket")
             continue
 
-        setup_script = f"""
+        if rootless:
+            setup_script = f"""
+set -euo pipefail
+mkdir -p "$HOME/.config/systemd/user"
+cat << 'EOF' > "{socket_path}"
+{socket_content}
+EOF
+
+cat << 'EOF' > "{service_path}"
+{service_content}
+EOF
+
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+systemctl --user daemon-reload
+systemctl --user enable --now '{unit_name}.socket'
+"""
+        else:
+            setup_script = f"""
 set -euo pipefail
 sudo tee '{socket_path}' >/dev/null << 'EOF'
 {socket_content}
@@ -756,18 +830,18 @@ def create_baseline_snapshot(params: dict, host: str, dry_run: bool = False) -> 
     snap_desc = params.get("SNAPSHOT_BASE_DESC", "Pristine base setup with Docker and Python")
 
     print(f"[*] Checking pristine baseline snapshot '{snap_name}' on {host}...")
-    ret, out, _ = run_cmd_status(["sudo", "virsh", "snapshot-list", vm_name], host=host)
+    ret, out, _ = run_cmd_status(virsh_cmd(host, "snapshot-list", vm_name), host=host)
     if ret == 0 and snap_name in out:
         print(f"    [✓] Baseline snapshot '{snap_name}' already exists.")
         return
 
-    cmd = [
-        "sudo", "virsh", "snapshot-create-as",
+    cmd = virsh_cmd(
+        host, "snapshot-create-as",
         "--domain", vm_name,
         "--name", snap_name,
         "--disk-only",
         "--description", snap_desc,
-    ]
+    )
 
     if dry_run:
         print(f"    [PLAN] {' '.join(cmd)}")
@@ -876,7 +950,7 @@ def execute_status(params: dict) -> None:
     print(f"[*] Libvirt Domain State: {state.upper()}")
 
     # Check snapshots
-    ret, snap_out, _ = run_cmd_status(["sudo", "virsh", "snapshot-list", vm_name], host=host)
+    ret, snap_out, _ = run_cmd_status(virsh_cmd(host, "snapshot-list", vm_name), host=host)
     if ret == 0:
         print("\n[*] Snapshots:")
         print(snap_out if snap_out else "    (No snapshots found)")
@@ -901,11 +975,18 @@ def execute_status(params: dict) -> None:
     else:
         print(f"    [!] SSH to '{vm_name}' is currently UNREACHABLE (VM may be booting or shut off).")
 
-    # Check Hypervisor Proxy Socket
+    # Check Hypervisor Proxy Socket (system or user systemd)
     proxy_unit = f"{vm_name}-p{ext_port}-proxy.socket"
-    ret, sock_out, _ = run_cmd_status(["systemctl", "is-active", proxy_unit], host=host)
-    if ret != 0 or sock_out != "active":
-        ret, sock_out, _ = run_cmd_status(["systemctl", "is-active", "airlock-proxy.socket"], host=host)
+    ret, sock_out, _ = run_cmd_status(
+        [
+            "bash", "-c",
+            f"if [ \"$(systemctl is-active {shlex.quote(proxy_unit)} 2>/dev/null)\" = \"active\" ]; then echo active; "
+            f"elif [ \"$(XDG_RUNTIME_DIR=\"/run/user/$(id -u)\" systemctl --user is-active {shlex.quote(proxy_unit)} 2>/dev/null)\" = \"active\" ]; then echo active; "
+            f"elif [ \"$(systemctl is-active airlock-proxy.socket 2>/dev/null)\" = \"active\" ]; then echo active; "
+            f"else echo inactive; fi",
+        ],
+        host=host,
+    )
     proxy_status = "ACTIVE" if sock_out == "active" else "INACTIVE"
     print(f"\n[*] Hypervisor Forwarder: {proxy_status} (http://{host}:{ext_port}/)")
 
@@ -981,13 +1062,13 @@ def execute_snapshot(params: dict, host: str, snapshot_name: str = "default", dr
     vm_name = params["VM_NAME"]
     snap_name = params.get("SNAPSHOT_BASE_NAME", "snapshot-base-clean") if snapshot_name in ("", "default") else snapshot_name
     snap_desc = f"AirlockVM snapshot '{snap_name}'"
-    cmd = [
-        "sudo", "virsh", "snapshot-create-as",
+    cmd = virsh_cmd(
+        host, "snapshot-create-as",
         "--domain", vm_name,
         "--name", snap_name,
         "--disk-only",
         "--description", snap_desc,
-    ]
+    )
     print(f"[*] Creating snapshot '{snap_name}' for domain '{vm_name}' on {host}...")
     if dry_run:
         print(f"    [PLAN] {' '.join(cmd)}")
@@ -1004,7 +1085,7 @@ def execute_rollback(params: dict, host: str, snapshot_name: str = "default", dr
     """Reverts a VM domain to a named or baseline snapshot."""
     vm_name = params["VM_NAME"]
     snap_name = params.get("SNAPSHOT_BASE_NAME", "snapshot-base-clean") if snapshot_name in ("", "default") else snapshot_name
-    cmd = ["sudo", "virsh", "snapshot-revert", "--domain", vm_name, "--snapshotname", snap_name]
+    cmd = virsh_cmd(host, "snapshot-revert", "--domain", vm_name, "--snapshotname", snap_name)
     print(f"[*] Reverting domain '{vm_name}' on {host} to snapshot '{snap_name}'...")
     if dry_run:
         print(f"    [PLAN] {' '.join(cmd)}")
@@ -1038,7 +1119,7 @@ def _parse_snapshot_overlay_paths(snap_xml: str) -> list[tuple[str, str]]:
 
 def _list_active_disks(vm_name: str, host: str) -> list[dict[str, str]]:
     """Returns active block device paths as [{'target': 'vda', 'source': '/path/...'}]."""
-    rc, out, _ = run_cmd_status(["sudo", "virsh", "domblklist", vm_name, "--details"], host=host)
+    rc, out, _ = run_cmd_status(virsh_cmd(host, "domblklist", vm_name, "--details"), host=host)
     disks: list[dict[str, str]] = []
     if rc != 0 or not out:
         return disks
@@ -1062,7 +1143,7 @@ def _collect_backing_chain_paths(active_disks: list[dict[str, str]], host: str) 
         if not src:
             continue
         referenced.add(src)
-        rc, out, err = run_cmd_status(["sudo", "qemu-img", "info", "-U", "--backing-chain", src], host=host)
+        rc, out, err = run_cmd_status(priv_cmd(host, "qemu-img", "info", "-U", "--backing-chain", src), host=host)
         if rc != 0:
             all_ok = False
             print(f"    [-] Warning: Failed to inspect backing chain for '{src}': {err or out}", file=sys.stderr)
@@ -1092,7 +1173,7 @@ def _get_ordered_backing_chain(disk_path: str, host: str) -> list[str]:
     """
     if not disk_path:
         return []
-    rc, out, err = run_cmd_status(["sudo", "qemu-img", "info", "-U", "--backing-chain", disk_path], host=host)
+    rc, out, err = run_cmd_status(priv_cmd(host, "qemu-img", "info", "-U", "--backing-chain", disk_path), host=host)
     if rc != 0:
         raise RuntimeError(f"Failed to inspect backing chain for '{disk_path}': {err or out}")
     chain: list[str] = []
@@ -1175,7 +1256,7 @@ def execute_snapshot_delete(
         return 1
 
     # Gate 3: Verify snapshot exists on hypervisor
-    rc_list, list_out, list_err = run_cmd_status(["sudo", "virsh", "snapshot-list", vm_name, "--name"], host=host)
+    rc_list, list_out, list_err = run_cmd_status(virsh_cmd(host, "snapshot-list", vm_name, "--name"), host=host)
     if rc_list != 0:
         print(f"[-] Error querying snapshots for '{vm_name}' on {host}: {list_err}", file=sys.stderr)
         return 1
@@ -1190,12 +1271,13 @@ def execute_snapshot_delete(
         return 1
 
     # Capture target snapshot's overlay disk paths before deletion for post-delete orphan verification
-    rc_sxml, snap_xml, _ = run_cmd_status(["sudo", "virsh", "snapshot-dumpxml", vm_name, snap_name], host=host)
+    rc_sxml, snap_xml, _ = run_cmd_status(virsh_cmd(host, "snapshot-dumpxml", vm_name, snap_name), host=host)
     snap_overlays = _parse_snapshot_overlay_paths(snap_xml) if rc_sxml == 0 else []
 
     print(f"[*] Deleting snapshot '{snap_name}' on domain '{vm_name}' ({host})...")
+    del_cmd = virsh_cmd(host, "snapshot-delete", "--domain", vm_name, "--snapshotname", snap_name)
     if dry_run:
-        print(f"    [PLAN] sudo virsh snapshot-delete --domain {vm_name} --snapshotname {snap_name}")
+        print(f"    [PLAN] {' '.join(del_cmd)}")
         if snap_overlays:
             print(f"    [PLAN] Verify backing chain and unlink any unreferenced overlay(s): {[p for _, p in snap_overlays]}")
         payload = {
@@ -1210,7 +1292,6 @@ def execute_snapshot_delete(
         return 0
 
     # Primary path: native libvirt external snapshot deletion (libvirt >= 9.0, e.g. Ubuntu 24.04 libvirt 10.0)
-    del_cmd = ["sudo", "virsh", "snapshot-delete", "--domain", vm_name, "--snapshotname", snap_name]
     ret, out, err = run_cmd_status(del_cmd, host=host)
 
     if ret != 0:
@@ -1237,16 +1318,16 @@ def execute_snapshot_delete(
         active_before = {d["target"]: d["source"] for d in _list_active_disks(vm_name, host)}
         for target_dev, overlay_path in snap_overlays:
             if active_before.get(target_dev) == overlay_path:
-                bc_cmd = ["sudo", "virsh", "blockcommit", vm_name, target_dev, "--active", "--pivot", "--wait"]
+                bc_cmd = virsh_cmd(host, "blockcommit", vm_name, target_dev, "--active", "--pivot", "--wait")
             else:
-                bc_cmd = ["sudo", "virsh", "blockcommit", vm_name, target_dev, "--top", overlay_path, "--wait"]
+                bc_cmd = virsh_cmd(host, "blockcommit", vm_name, target_dev, "--top", overlay_path, "--wait")
             rc_bc, _, err_bc = run_cmd_status(bc_cmd, host=host)
             if rc_bc != 0:
                 print(f"[-] Error during blockcommit for '{target_dev}': {err_bc}", file=sys.stderr)
                 return 1
 
         rc_meta, _, err_meta = run_cmd_status(
-            ["sudo", "virsh", "snapshot-delete", "--domain", vm_name, "--snapshotname", snap_name, "--metadata"],
+            virsh_cmd(host, "snapshot-delete", "--domain", vm_name, "--snapshotname", snap_name, "--metadata"),
             host=host,
         )
         if rc_meta != 0:
@@ -1254,7 +1335,7 @@ def execute_snapshot_delete(
             return 1
 
     # Query remaining snapshots & active disks post-delete
-    rc_rem, rem_out, _ = run_cmd_status(["sudo", "virsh", "snapshot-list", vm_name, "--name"], host=host)
+    rc_rem, rem_out, _ = run_cmd_status(virsh_cmd(host, "snapshot-list", vm_name, "--name"), host=host)
     remaining_snaps = [ln.strip() for ln in rem_out.splitlines() if ln.strip()] if rc_rem == 0 else []
     active_disks = _list_active_disks(vm_name, host)
 
@@ -1266,7 +1347,7 @@ def execute_snapshot_delete(
     }
     referenced, chain_ok = _collect_backing_chain_paths(active_disks, host)
     for rem_snap in remaining_snaps:
-        rc_rxml, rxml, _ = run_cmd_status(["sudo", "virsh", "snapshot-dumpxml", vm_name, rem_snap], host=host)
+        rc_rxml, rxml, _ = run_cmd_status(virsh_cmd(host, "snapshot-dumpxml", vm_name, rem_snap), host=host)
         if rc_rxml == 0 and rxml:
             for _, rpath in _parse_snapshot_overlay_paths(rxml):
                 referenced.add(rpath)
@@ -1281,7 +1362,7 @@ def execute_snapshot_delete(
             if os.path.basename(cand_path) in protected_basenames:
                 continue
             rc_rm, out_rm, _ = run_cmd_status(
-                ["sudo", "bash", "-c", f"if [ -e {shlex.quote(cand_path)} ]; then rm -f -- {shlex.quote(cand_path)} && echo REMOVED; fi"],
+                priv_cmd(host, "bash", "-c", f"if [ -e {shlex.quote(cand_path)} ]; then rm -f -- {shlex.quote(cand_path)} && echo REMOVED; fi"),
                 host=host,
             )
             if rc_rm == 0 and "REMOVED" in out_rm:
@@ -1328,7 +1409,7 @@ def execute_snapshot_flatten(
     }
 
     # Step 1: Inspect existing snapshots and active disk backing chains
-    rc_list, list_out, list_err = run_cmd_status(["sudo", "virsh", "snapshot-list", vm_name, "--name"], host=host)
+    rc_list, list_out, list_err = run_cmd_status(virsh_cmd(host, "snapshot-list", vm_name, "--name"), host=host)
     if rc_list != 0:
         print(f"[-] Error querying snapshots for '{vm_name}' on {host}: {list_err}", file=sys.stderr)
         return 1
@@ -1366,7 +1447,7 @@ def execute_snapshot_flatten(
                 _add_candidate(ov)
 
     for snap in existing_snaps:
-        rc_sxml, sxml, _ = run_cmd_status(["sudo", "virsh", "snapshot-dumpxml", vm_name, snap], host=host)
+        rc_sxml, sxml, _ = run_cmd_status(virsh_cmd(host, "snapshot-dumpxml", vm_name, snap), host=host)
         if rc_sxml == 0 and sxml:
             for _, ov_path in _parse_snapshot_overlay_paths(sxml):
                 _add_candidate(ov_path)
@@ -1392,15 +1473,14 @@ def execute_snapshot_flatten(
     if dry_run:
         for item in commit_plan:
             print(
-                f"    [PLAN] sudo virsh blockcommit {vm_name} {item['target']} "
-                f"--base {item['base']} --active --pivot --wait"
+                f"    [PLAN] {' '.join(virsh_cmd(host, 'blockcommit', vm_name, item['target'], '--base', item['base'], '--active', '--pivot', '--wait'))}"
             )
         for snap in reversed(existing_snaps):
-            print(f"    [PLAN] sudo virsh snapshot-delete --domain {vm_name} --snapshotname {snap} --metadata")
+            print(f"    [PLAN] {' '.join(virsh_cmd(host, 'snapshot-delete', '--domain', vm_name, '--snapshotname', snap, '--metadata'))}")
         if candidate_overlays:
             print(f"    [PLAN] Verify unreferenced and unlink overlay(s): {candidate_overlays}")
         if new_snap:
-            print(f"    [PLAN] sudo virsh snapshot-create-as --domain {vm_name} --name {new_snap} --disk-only")
+            print(f"    [PLAN] {' '.join(virsh_cmd(host, 'snapshot-create-as', '--domain', vm_name, '--name', new_snap, '--disk-only'))}")
         payload = {
             "changed": True,
             "removed_snapshots": list(existing_snaps),
@@ -1436,11 +1516,11 @@ def execute_snapshot_flatten(
 
     # Step 3: Collapse backing chain per disk into each VM-owned base disk (never touching shared golden/cloud images)
     for item in commit_plan:
-        bc_cmd = [
-            "sudo", "virsh", "blockcommit", vm_name, item["target"],
+        bc_cmd = virsh_cmd(
+            host, "blockcommit", vm_name, item["target"],
             "--base", item["base"],
             "--active", "--pivot", "--wait",
-        ]
+        )
         print(f"    -> Committing '{item['target']}' overlays into base '{item['base']}'...")
         rc_bc, out_bc, err_bc = run_cmd_status(bc_cmd, host=host)
         if rc_bc != 0:
@@ -1452,7 +1532,7 @@ def execute_snapshot_flatten(
     removed_snapshots: list[str] = []
     for snap in reversed(existing_snaps):
         rc_meta, _, err_meta = run_cmd_status(
-            ["sudo", "virsh", "snapshot-delete", "--domain", vm_name, "--snapshotname", snap, "--metadata"],
+            virsh_cmd(host, "snapshot-delete", "--domain", vm_name, "--snapshotname", snap, "--metadata"),
             host=host,
         )
         if rc_meta != 0:
@@ -1472,7 +1552,7 @@ def execute_snapshot_flatten(
             if not cand_path or cand_path in referenced or os.path.basename(cand_path) in protected_basenames:
                 continue
             rc_rm, out_rm, _ = run_cmd_status(
-                ["sudo", "bash", "-c", f"if [ -e {shlex.quote(cand_path)} ]; then rm -f -- {shlex.quote(cand_path)} && echo REMOVED; fi"],
+                priv_cmd(host, "bash", "-c", f"if [ -e {shlex.quote(cand_path)} ]; then rm -f -- {shlex.quote(cand_path)} && echo REMOVED; fi"),
                 host=host,
             )
             if rc_rm == 0 and "REMOVED" in out_rm:
@@ -1484,13 +1564,13 @@ def execute_snapshot_flatten(
     if new_snap:
         snap_desc = f"AirlockVM flattened baseline snapshot '{new_snap}'"
         rc_new, out_new, err_new = run_cmd_status(
-            [
-                "sudo", "virsh", "snapshot-create-as",
+            virsh_cmd(
+                host, "snapshot-create-as",
                 "--domain", vm_name,
                 "--name", new_snap,
                 "--disk-only",
                 "--description", snap_desc,
-            ],
+            ),
             host=host,
         )
         if rc_new != 0:
@@ -1501,7 +1581,7 @@ def execute_snapshot_flatten(
 
     # Step 7: Refresh vm.yaml disk sources (and snapshot_base_name if a new baseline was created)
     final_disks = _list_active_disks(vm_name, host)
-    rc_rem, rem_out, _ = run_cmd_status(["sudo", "virsh", "snapshot-list", vm_name, "--name"], host=host)
+    rc_rem, rem_out, _ = run_cmd_status(virsh_cmd(host, "snapshot-list", vm_name, "--name"), host=host)
     remaining_snaps = [ln.strip() for ln in rem_out.splitlines() if ln.strip()] if rc_rem == 0 else []
     vm_yaml_updated = _refresh_vm_yaml_disks(config_path, final_disks, new_baseline_name=created_snap)
     if vm_yaml_updated:
@@ -1531,10 +1611,10 @@ def execute_power_action(params: dict, action: str) -> None:
     host = params["HYPERVISOR_HOST"]
 
     action_map = {
-        "start": ["sudo", "virsh", "start", vm_name],
-        "stop": ["sudo", "virsh", "shutdown", vm_name],
-        "destroy": ["sudo", "virsh", "destroy", vm_name],
-        "reboot": ["sudo", "virsh", "reboot", vm_name],
+        "start": virsh_cmd(host, "start", vm_name),
+        "stop": virsh_cmd(host, "shutdown", vm_name),
+        "destroy": virsh_cmd(host, "destroy", vm_name),
+        "reboot": virsh_cmd(host, "reboot", vm_name),
     }
 
     cmd = action_map.get(action)
@@ -1558,7 +1638,7 @@ def remove_static_dhcp(params: dict, host: str, dry_run: bool = False) -> None:
     vm_name = params["VM_NAME"]
 
     print(f"    -> Removing static DHCP reservation in libvirt network '{net_name}' on {host}...")
-    ret, out, _ = run_cmd_status(["sudo", "virsh", "net-dumpxml", net_name], host=host)
+    ret, out, _ = run_cmd_status(virsh_cmd(host, "net-dumpxml", net_name), host=host)
     matched_snippets: list[str] = []
     if ret == 0 and out:
         for m in re.finditer(r"<host\b[^>]*/>", out):
@@ -1575,13 +1655,13 @@ def remove_static_dhcp(params: dict, host: str, dry_run: bool = False) -> None:
     if not matched_snippets:
         if dry_run and mac and ip:
             fallback_xml = f"<host mac='{mac}' name='{vm_name}' ip='{ip}'/>"
-            print(f"    [PLAN] sudo virsh net-update {net_name} delete ip-dhcp-host \"{fallback_xml}\" --live --config")
+            print(f"    [PLAN] {' '.join(virsh_cmd(host, 'net-update', net_name, 'delete', 'ip-dhcp-host', fallback_xml, '--live', '--config'))}")
         else:
             print(f"    [✓] No static DHCP reservation found for '{vm_name}' in '{net_name}'.")
         return
 
     for xml_snippet in matched_snippets:
-        cmd_live_cfg = ["sudo", "virsh", "net-update", net_name, "delete", "ip-dhcp-host", xml_snippet, "--live", "--config"]
+        cmd_live_cfg = virsh_cmd(host, "net-update", net_name, "delete", "ip-dhcp-host", xml_snippet, "--live", "--config")
         if dry_run:
             print(f"    [PLAN] {' '.join(cmd_live_cfg)}")
             continue
@@ -1589,7 +1669,7 @@ def remove_static_dhcp(params: dict, host: str, dry_run: bool = False) -> None:
         if rc != 0:
             # Fallback to --config only if network is inactive
             rc2, _, err2 = run_cmd_status(
-                ["sudo", "virsh", "net-update", net_name, "delete", "ip-dhcp-host", xml_snippet, "--config"],
+                virsh_cmd(host, "net-update", net_name, "delete", "ip-dhcp-host", xml_snippet, "--config"),
                 host=host,
             )
             if rc2 != 0:
@@ -1730,7 +1810,7 @@ def execute_purge(params: dict, host: str, dry_run: bool = False, purge_ssh_keys
     exists, state = check_domain_status(vm_name, host)
     if exists:
         if not dry_run:
-            rc_blk, blk_out, _ = run_cmd_status(["sudo", "virsh", "domblklist", vm_name, "--details"], host=host)
+            rc_blk, blk_out, _ = run_cmd_status(virsh_cmd(host, "domblklist", vm_name, "--details"), host=host)
             if rc_blk == 0 and blk_out:
                 for line in blk_out.splitlines()[2:]:
                     parts = line.split()
@@ -1742,18 +1822,18 @@ def execute_purge(params: dict, host: str, dry_run: bool = False, purge_ssh_keys
         if state.lower() == "running":
             print(f"    -> Destroying running domain '{vm_name}'...")
             if not dry_run:
-                run_cmd_status(["sudo", "virsh", "destroy", vm_name], host=host)
+                run_cmd_status(virsh_cmd(host, "destroy", vm_name), host=host)
             else:
-                print(f"    [PLAN] sudo virsh destroy {vm_name}")
+                print(f"    [PLAN] {' '.join(virsh_cmd(host, 'destroy', vm_name))}")
 
         print(f"    -> Undefining domain '{vm_name}' (NVRAM + snapshot metadata)...")
         if not dry_run:
-            ret, _, err = run_cmd_status(["sudo", "virsh", "undefine", vm_name, "--nvram", "--snapshots-metadata"], host=host)
+            ret, _, err = run_cmd_status(virsh_cmd(host, "undefine", vm_name, "--nvram", "--snapshots-metadata"), host=host)
             if ret != 0:
-                run_cmd_status(["sudo", "virsh", "undefine", vm_name, "--nvram"], host=host)
+                run_cmd_status(virsh_cmd(host, "undefine", vm_name, "--nvram"), host=host)
             print(f"    [✓] Domain undefined.")
         else:
-            print(f"    [PLAN] sudo virsh undefine {vm_name} --nvram --snapshots-metadata")
+            print(f"    [PLAN] {' '.join(virsh_cmd(host, 'undefine', vm_name, '--nvram', '--snapshots-metadata'))}")
     else:
         print(f"    -> Domain '{vm_name}' is not registered in libvirt.")
 
@@ -1763,8 +1843,8 @@ def execute_purge(params: dict, host: str, dry_run: bool = False, purge_ssh_keys
             discovered_disks.append(src)
 
     # Remove disk storage, seed ISOs, and snapshot overlays.
-    # IMPORTANT: Execute glob expansion inside `sudo bash -c` so root can list /var/lib/libvirt/images
-    # (unprivileged bash fails to expand globs in 0700/0711 directories and passes literal '*' to rm -f).
+    # IMPORTANT: Execute glob expansion inside priv_cmd("bash", "-c", ...) so root (or rootless pool owner)
+    # expands globs directly inside the storage directory.
     q_dir = shlex.quote(target_storage)
     q_vm = shlex.quote(vm_name)
     extra_paths_bash = " ".join(shlex.quote(p) for p in discovered_disks)
@@ -1793,7 +1873,7 @@ def execute_purge(params: dict, host: str, dry_run: bool = False, purge_ssh_keys
 
     print(f"    -> Deleting VM storage images and snapshots in {target_storage} for '{vm_name}'...")
     if not dry_run:
-        ret, out, err = run_cmd_status(["sudo", "bash", "-c", storage_script], host=host)
+        ret, out, err = run_cmd_status(priv_cmd(host, "bash", "-c", storage_script), host=host)
         removed_files = [ln[len("REMOVED:"):] for ln in out.splitlines() if ln.startswith("REMOVED:")]
         if ret == 0:
             if removed_files:
@@ -1805,7 +1885,7 @@ def execute_purge(params: dict, host: str, dry_run: bool = False, purge_ssh_keys
         else:
             print(f"    [-] Warning: Storage cleanup incomplete: {err or out}")
     else:
-        print(f"    [PLAN] sudo bash -c \"shopt -s nullglob; rm -f {target_storage}/{vm_name}.qcow2 {target_storage}/{vm_name}-seed.iso {target_storage}/{vm_name}.* {target_storage}/{vm_name}-seed.*\"")
+        print(f"    [PLAN] {' '.join(priv_cmd(host, 'bash', '-c'))} \"shopt -s nullglob; rm -f {target_storage}/{vm_name}.qcow2 {target_storage}/{vm_name}-seed.iso {target_storage}/{vm_name}.* {target_storage}/{vm_name}-seed.*\"")
 
     # Remove libvirt static DHCP reservation
     remove_static_dhcp(params, host, dry_run=dry_run)
@@ -1816,18 +1896,33 @@ def execute_purge(params: dict, host: str, dry_run: bool = False, purge_ssh_keys
     # Clean up hypervisor proxy forwarders for this VM
     print(f"    -> Cleaning up hypervisor proxy forwarders for '{vm_name}'...")
     legacy_unit = " airlock-proxy.socket" if vm_name == "airlock-vm" else ""
+    rootless = is_rootless_host(host)
     if not dry_run:
-        cleanup_proxy_script = (
-            f"shopt -s nullglob; "
-            f"systemctl stop {q_vm}-p*-proxy.socket {q_vm}-p*-proxy.service {q_vm}-proxy.socket{legacy_unit} 2>/dev/null || true; "
-            f"systemctl disable {q_vm}-p*-proxy.socket {q_vm}-proxy.socket{legacy_unit} 2>/dev/null || true; "
-            f"rm -f /etc/systemd/system/{q_vm}-p*-proxy.* /etc/systemd/system/{q_vm}-proxy.* 2>/dev/null || true; "
-            f"systemctl daemon-reload 2>/dev/null || true"
-        )
-        run_cmd_status(["sudo", "bash", "-c", cleanup_proxy_script], host=host)
+        if rootless:
+            cleanup_proxy_script = (
+                f"shopt -s nullglob; "
+                f"export XDG_RUNTIME_DIR=\"/run/user/$(id -u)\"; "
+                f"systemctl --user stop {q_vm}-p*-proxy.socket {q_vm}-p*-proxy.service {q_vm}-proxy.socket{legacy_unit} 2>/dev/null || true; "
+                f"systemctl --user disable {q_vm}-p*-proxy.socket {q_vm}-proxy.socket{legacy_unit} 2>/dev/null || true; "
+                f"rm -f \"$HOME\"/.config/systemd/user/{q_vm}-p*-proxy.* \"$HOME\"/.config/systemd/user/{q_vm}-proxy.* 2>/dev/null || true; "
+                f"systemctl --user daemon-reload 2>/dev/null || true"
+            )
+            run_cmd_status(["bash", "-c", cleanup_proxy_script], host=host)
+        else:
+            cleanup_proxy_script = (
+                f"shopt -s nullglob; "
+                f"systemctl stop {q_vm}-p*-proxy.socket {q_vm}-p*-proxy.service {q_vm}-proxy.socket{legacy_unit} 2>/dev/null || true; "
+                f"systemctl disable {q_vm}-p*-proxy.socket {q_vm}-proxy.socket{legacy_unit} 2>/dev/null || true; "
+                f"rm -f /etc/systemd/system/{q_vm}-p*-proxy.* /etc/systemd/system/{q_vm}-proxy.* 2>/dev/null || true; "
+                f"systemctl daemon-reload 2>/dev/null || true"
+            )
+            run_cmd_status(["sudo", "bash", "-c", cleanup_proxy_script], host=host)
         print(f"    [✓] Hypervisor proxy sockets cleaned.")
     else:
-        print(f"    [PLAN] sudo systemctl stop {vm_name}-p*-proxy.socket && rm -f /etc/systemd/system/{vm_name}-p*-proxy.*")
+        if rootless:
+            print(f"    [PLAN] systemctl --user stop {vm_name}-p*-proxy.socket && rm -f ~/.config/systemd/user/{vm_name}-p*-proxy.*")
+        else:
+            print(f"    [PLAN] sudo systemctl stop {vm_name}-p*-proxy.socket && rm -f /etc/systemd/system/{vm_name}-p*-proxy.*")
 
     # Clean up inventory record and regenerate sync dispatcher
     sync_inventory_record(params, action="purge", dry_run=dry_run)
@@ -2039,10 +2134,15 @@ def main():
     seed_iso_path = f"{target_storage}/{vm_name}-seed.iso"
 
     print(f"[*] Preparing VM disk image: {disk_path} ({params['DISK_SIZE_GIB']} GiB)...")
+    rootless = is_rootless_host(host)
     if args.dry_run:
-        print(f"    [PLAN] sudo qemu-img create -f qcow2 -b '{base_image}' -F qcow2 '{disk_path}' {params['DISK_SIZE_GIB']}G")
+        prefix = "" if rootless else "sudo "
+        print(f"    [PLAN] {prefix}qemu-img create -f qcow2 -b '{base_image}' -F qcow2 '{disk_path}' {params['DISK_SIZE_GIB']}G")
     else:
-        create_disk_cmd = f"sudo qemu-img create -f qcow2 -b '{base_image}' -F qcow2 '{disk_path}' {params['DISK_SIZE_GIB']}G && sudo chown libvirt-qemu:kvm '{disk_path}' && sudo chmod 664 '{disk_path}'"
+        if rootless:
+            create_disk_cmd = f"qemu-img create -f qcow2 -b '{base_image}' -F qcow2 '{disk_path}' {params['DISK_SIZE_GIB']}G && chmod 664 '{disk_path}'"
+        else:
+            create_disk_cmd = f"sudo qemu-img create -f qcow2 -b '{base_image}' -F qcow2 '{disk_path}' {params['DISK_SIZE_GIB']}G && sudo chown libvirt-qemu:kvm '{disk_path}' && sudo chmod 664 '{disk_path}'"
         ret, _, err = run_cmd_status(["bash", "-c", create_disk_cmd], host=host)
         if ret != 0:
             raise RuntimeError(f"Failed to create VM disk: {err}")
@@ -2066,7 +2166,7 @@ def main():
         lease_seen = False
         for attempt in range(1, max_attempts + 1):
             if not lease_seen and (attempt == 1 or attempt % 5 == 0):
-                rc_ip, ip_out, _ = run_cmd_status(["sudo", "virsh", "domifaddr", vm_name], host=host)
+                rc_ip, ip_out, _ = run_cmd_status(virsh_cmd(host, "domifaddr", vm_name), host=host)
                 if rc_ip == 0 and params["VM_IP"] in ip_out:
                     lease_seen = True
                     print(f"\n    [✓] DHCP lease active for '{vm_name}': {params['VM_IP']}")
