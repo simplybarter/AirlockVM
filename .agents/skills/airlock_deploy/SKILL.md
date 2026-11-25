@@ -69,7 +69,7 @@ Once the prerequisite gates pass, `deploy_vm.py` executes the automated pipeline
 6. **Domain Provisioning (`virt-install`)**:
    * Launches the VM domain with UEFI bootloader, host-passthrough CPU mode, and VirtIO networking.
 7. **Hypervisor Port Forwarder (`systemd-socket-proxyd`)**:
-   * Configures and enables `/etc/systemd/system/airlock-proxy.socket` on the hypervisor to route physical LAN traffic to the VM's internal application port with **zero processes running on your development workstation**.
+   * Configures and enables `/etc/systemd/system/{vm_name}-p{ext_port}-proxy.socket` (or user-level `~/.config/systemd/user/{vm_name}-p{ext_port}-proxy.socket` on zero-`sudo` rootless hypervisors) to route physical LAN traffic to the VM's internal application port with **zero processes running on your development workstation**.
 8. **Pristine Snapshot Creation**:
    * Polls SSH connectivity until the VM is online and cloud-init has finished.
    * Creates a pristine baseline disk snapshot (`snapshot-base-clean`) for instant disaster rollback.
@@ -145,6 +145,15 @@ python3 .agents/skills/airlock_deploy/scripts/deploy_vm.py --purge
 
 # Reboot:
 python3 .agents/skills/airlock_deploy/scripts/deploy_vm.py --reboot
+
+# Snapshot management (create, rollback, delete, flatten chain):
+python3 .agents/skills/airlock_deploy/scripts/deploy_vm.py --snapshot before-upgrade
+python3 .agents/skills/airlock_deploy/scripts/deploy_vm.py --rollback before-upgrade
+python3 .agents/skills/airlock_deploy/scripts/deploy_vm.py --delete-snapshot before-upgrade
+python3 .agents/skills/airlock_deploy/scripts/deploy_vm.py --flatten-snapshots --force
+
+# Pre-bake a golden Ubuntu 24.04 cloud-init base image on a hypervisor:
+python3 .agents/skills/airlock_deploy/scripts/deploy_vm.py --bake-golden --host remotehost
 ```
 
 ---

@@ -22,6 +22,7 @@ By strictly separating software engineering workstations from runtime execution 
 ## Key Features
 
 * **Universal & Zero-Assumption**: Operates seamlessly across local KVM installations or remote physical hypervisors via SSH, without hardcoded machine names or private IP addresses.
+* **Zero-`sudo` (Rootless) Hypervisor Support**: Supports dedicated least-privilege remote hypervisor accounts (`libvirt,kvm` groups only, zero `sudo`), ACL storage pools (`/var/lib/libvirt/airlock`), user-level systemd socket proxies (`~/.config/systemd/user/`), and explicit SSH key tracking (`connection.ssh_key_path`).
 * **Dual Topology Support**: Enables both **Option A (Dedicated Execution VM)** via `airlock_create_vm` and **Option B (Shared Worker Attach)** via `airlock_attach_app` based on project isolation needs.
 * **Autonomous Intelligence Engines**: Built-in Python engines for deployability pre-flight gates (`preflight.py`), live configuration drift & reconciliation (`drift.py`), multi-layer crash diagnostics (`diagnostics.py`), guest workload profiling & rightsizing (`profiler.py`), and workstation zero-workload invariant verification (`security.py`).
 * **Smart Pre-Flight Capability Checks**: Automatically inspects target hypervisors for `/dev/kvm` hardware acceleration, CPU virtualization extensions (`vmx`/`svm`), active `libvirtd` daemons, and storage space before provisioning.
@@ -86,10 +87,12 @@ By strictly separating software engineering workstations from runtime execution 
 │   ├── security.py                          # Workstation zero-workload & secret leak audit
 │   └── mcp/                                 # Model Context Protocol service
 │       └── server.py                        # AirlockVM FastMCP Server (26 declarative tools)
-├── tests/                                   # Integration & permutation test suites
-│   └── test_integration_permutations.py     # 26-permutation end-to-end test suite
+├── tests/                                   # Integration & unit test suites
+│   ├── test_integration_permutations.py     # 40-permutation end-to-end test suite
+│   └── test_unit_mitigations.py             # Deterministic unit tests
 ├── docs/                                    # Architecture, security & MCP documentation
-│   ├── ARCHITECTURE.md                      # Security model and isolation topology
+│   ├── ARCHITECTURE.md                      # Architecture and isolation topology
+│   ├── SECURITY.md                          # Security, rootless hardening & proxy isolation
 │   ├── MCP_SERVER.md                        # Model Context Protocol server reference
 │   └── INTEGRATION_TESTING.md               # End-to-end integration testing guide & matrix
 ├── .agents/skills/                          # Core AirlockVM automation engines
@@ -162,11 +165,15 @@ python3 -m venv .venv
 AirlockVM provides a unified `airlock` command line interface for everyday developer workflows:
 
 ```bash
-# List all registered execution VMs:
+# List all registered execution VMs and hypervisors:
 airlock list
+airlock hosts --live
 
 # Ping the AirlockVM control plane:
 airlock ping
+
+# Check live VM status, IP, uptime, and snapshots:
+airlock status <vm-name>
 
 # Probe a hypervisor host and size runbooks:
 airlock probe localhost
@@ -175,8 +182,10 @@ airlock probe my-hypervisor --interactive
 # Audit pre-flight deployability gates:
 airlock preflight <vm-name>
 
-# Deploy the execution VM to the target hypervisor:
+# Deploy, update, or permanently purge an execution VM:
 airlock deploy --vm <vm-name>
+airlock update <vm-name> --vcpu 4 --memory-mib 4096
+airlock purge <vm-name> --dry-run
 
 # Push application files to the VM:
 airlock sync <vm-name>
@@ -184,15 +193,22 @@ airlock sync <vm-name>
 # Run tests or build commands inside the isolated VM:
 airlock exec <vm-name> -- pytest -q
 
-# Pre-bake a golden base image on a hypervisor for ~10-15s VM spin-up:
+# Manage external disk snapshots (create, revert, delete, flatten):
+airlock snapshot <vm-name> create before-upgrade
+airlock snapshot <vm-name> revert before-upgrade
+airlock snapshot <vm-name> delete before-upgrade
+airlock snapshot <vm-name> flatten --force
+
+# Pre-bake a golden Ubuntu 24.04 cloud-init image for fast-boot cloning:
 airlock bake-image localhost
 
 # Connect via SSH or open in remote IDE (VS Code / Cursor):
 airlock connect <vm-name> --ide vscode
 
-# Diagnose crashes or audit drift:
+# Diagnose crashes, audit drift, or verify security boundaries:
 airlock diagnose <vm-name>
 airlock drift <vm-name>
+airlock audit-security <vm-name>
 ```
 
 ---

@@ -49,7 +49,7 @@ Because the hypervisor proxy forwards raw TCP packets transparently, authenticat
 
 ## 2. Default Network Exposure & Binding Architecture
 
-When `airlock_deploy_vm` (or `deploy_vm.py`) sets up hypervisor port forwarding, the generated systemd socket unit (`/etc/systemd/system/{vm_name}-p{ext_port}-proxy.socket`) dynamically selects its binding interface based on the target hypervisor:
+When `airlock_deploy_vm` (or `deploy_vm.py`) sets up hypervisor port forwarding, the generated systemd socket unit (`/etc/systemd/system/{vm_name}-p{ext_port}-proxy.socket` on `sudo` hosts, or `~/.config/systemd/user/{vm_name}-p{ext_port}-proxy.socket` on zero-`sudo` rootless hypervisors) dynamically selects its binding interface based on the target hypervisor:
 
 ### 1. Localhost Deployments (`vmhost = localhost` or `127.0.0.1`)
 ```ini
@@ -227,8 +227,9 @@ flowchart TD
 ### Layer 3: Hypervisor Boundary & Network Isolation
 
 * **Isolated Virtual Network**: The guest VM resides on an internal virtual bridge (`virbr0`) with private static DHCP leasing (e.g., `192.168.122.x`). The VM has no public IP address and is not directly routeable from the internet.
-* **Layer 4 Socket Multiplexing**: Instead of exposing the entire virtual machine or running complex VPN tunnels per app, the hypervisor forwards individual TCP ports using systemd socket units.
+* **Layer 4 Socket Multiplexing**: Instead of exposing the entire virtual machine or running complex VPN tunnels per app, the hypervisor forwards individual TCP ports using systemd socket units (`/etc/systemd/system/` or user-level `~/.config/systemd/user/` on rootless hosts).
 * **Process Separation**: The proxy runs under the hypervisor's `systemd-socket-proxyd` daemon, isolated from the guest operating system.
+* **Zero-`sudo` (Rootless) Hypervisor Isolation**: Recommended for remote physical hypervisors. Provision a dedicated hypervisor user (e.g., `airlock`) belonging **only** to `libvirt` and `kvm` groups (zero `sudo` privileges), with `loginctl enable-linger` for persistent user-level socket proxies (`~/.config/systemd/user/`), a dedicated storage pool (`/var/lib/libvirt/airlock`, `2775` with default ACLs for `libvirt-qemu` / `libvirt`), and an explicit SSH key recorded in `vmhost.yaml` (`connection.ssh_key_path`). For rootless `airlock bake-image` (`libguestfs` / `supermin`), ensure `/boot/vmlinuz-*` is world-readable (`0644`).
 
 ---
 

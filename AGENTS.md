@@ -75,34 +75,38 @@ The Model Context Protocol control plane exposes a complete tool suite for codin
 1. **Observability & Inspection**:
    * `airlock_ping`: Verifies control plane readiness and runtime version.
    * `airlock_list`: Enumerates all hypervisors and VMs in `inventory/`.
-   * `airlock_list_hypervisors(live_probe)`: Lists registered hypervisors with CPU, RAM, storage pools, networks, and VM counts.
+   * `airlock_list_hypervisors(live_probe)`: Lists registered hypervisors with CPU, RAM, storage pools, networks, `connection.ssh_key_path`, rootless capability, and VM counts.
    * `airlock_status(vm_name)`: Queries live libvirt domain status and hardware states.
+   * `airlock_health_check(vm_name, app_name, path)`: Probes live HTTP proxy routes with retries and captures guest logs on failure.
 
 2. **Application Stack Detection**:
    * `airlock_detect_app(local_path)`: Analyzes project manifests (`package.json`, `pyproject.toml`, `requirements.txt`, `Dockerfile`, `.env`) to auto-infer frameworks, internal ports, and startup commands.
 
 3. **Hypervisor Placement & Networking**:
    * `airlock_select_host(required_vcpu, required_ram_mib, required_disk_gb)`: Audits registered hypervisors and selects the optimal host based on CPU, RAM, and disk headroom.
-   * `airlock_alloc_network(vmhost, network_name)`: Automatically allocates the next clean static IP and collision-free MAC on `virbr0`.
+   * `airlock_alloc_network(vmhost, network_name)`: Automatically allocates the next clean static IP (skipping live DHCP leases) and collision-free MAC on `virbr0`.
    * `airlock_find_port(vm_name, internal_port, preferred_port, vmhost)`: Allocates collision-free host proxy ports.
 
-4. **Lifecycle Topologies**:
+4. **Lifecycle Topologies & Power**:
    * `airlock_create_vm(...)`: Provisions a dedicated virtual machine domain (`vm.yaml`, `VM.md`, deployment scripts).
    * `airlock_update_vm(...)`: Updates VM resources (`vcpu`, `memory_mib`, `disk_size_gib`), ports, or `post_deploy` in `vm.yaml`, re-rendering `VM.md` and sync scripts.
    * `airlock_attach_app(...)`: Attaches a repository to an existing shared worker VM with idempotent updates.
+   * `airlock_power(vm_name, action)`: Issues power state transitions (`start`, `stop`, `reboot`, `destroy`).
    * `airlock_purge_vm(vm_name, dry_run, purge_ssh_keys)`: Permanently removes a VM domain, disk/snapshot images, DHCP reservation, proxies, SSH config block, and inventory record.
 
 5. **Autonomous Intelligence Engines**:
-   * `airlock_preflight(vm_name)`: Executes 8 pre-requisite safety gates before provisioning (verdict: `READY_TO_DEPLOY` or `BLOCKED`).
-   * `airlock_deploy_vm(vm_name, dry_run)`: Provisions KVM domains, disk pools, cloud-init images, and host proxies.
+   * `airlock_preflight(vm_name)`: Executes 8 pre-requisite safety gates (supporting both rootless `libvirt`/`kvm` and `sudo` hypervisors) before provisioning (verdict: `READY_TO_DEPLOY` or `BLOCKED`).
+   * `airlock_deploy_vm(vm_name, dry_run)`: Provisions KVM domains, disk pools, cloud-init images, and host proxies (system or rootless user units).
    * `airlock_deploy_app(vm_name, offline)`: Rsyncs application code and launches workloads inside the VM.
    * `airlock_exec(vm_name, command, workdir, timeout)`: Executes build, test, or diagnostic shell commands inside the isolated guest VM.
    * `airlock_bake_image(vmhost, force, dry_run)`: Pre-bakes a golden Ubuntu 24.04 `qcow2` base image on the hypervisor for fast-boot VM cloning.
    * `airlock_audit_drift(vm_name)`: Compares live hypervisor state against the `vm.yaml` SSOT to identify domain, network, or proxy drift.
+   * `airlock_reconcile(vm_name, strategy)`: Reconciles detected drift between `vm.yaml` SSOT and the live hypervisor.
    * `airlock_diagnose(vm_name)`: Performs root-cause failure analysis on stalled workloads and recommends rollbacks.
    * `airlock_audit_security(vm_name, app_name)`: Audits for credential leaks (`.env` vs `.env.local`), sensitive key leakage, and host socket leakage.
    * `airlock_profile_workload(vm_name, duration_sec)`: Profiles guest CPU, RAM, and top processes.
-   * `airlock_snapshot(vm_name, action, snapshot_name)`: Creates external disk snapshots and safely rolls back guest state.
+   * `airlock_checkpoint(vm_name, action, snapshot_name)`: Creates or reverts pre-deployment safety checkpoints.
+   * `airlock_snapshot(vm_name, action, snapshot_name, force, dry_run)`: Manages external disk snapshots (`create`, `revert`, `list`, `delete`, `flatten`).
 
 ---
 
@@ -115,6 +119,7 @@ AirlockVM includes a unified client connector script (`connect_airlock.sh`) to o
 ./connect_airlock.sh --target ../DummyAirlockApp --all
 
 # Connect specific platforms:
+./connect_airlock.sh --target ../DummyAirlockApp --antigravity
 ./connect_airlock.sh --target ../DummyAirlockApp --gemini
 ./connect_airlock.sh --target ../DummyAirlockApp --cursor
 ./connect_airlock.sh --target ../DummyAirlockApp --vscode

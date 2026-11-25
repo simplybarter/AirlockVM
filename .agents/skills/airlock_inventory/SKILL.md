@@ -56,6 +56,7 @@ inventory/
    * Collects hardware specs: CPU model, physical sockets, cores, threads, and hardware VT capability (`vmx`/`svm`, `/dev/kvm`).
    * Measures physical RAM capacity, available memory, and root filesystem disk utilization.
    * Audits Libvirt daemon status, QEMU version, active storage pools, and virtual bridge networks (including DHCP subnets, ranges, and static lease reservations).
+   * Detects zero-`sudo` rootless hypervisor capability (`libvirt,kvm` group membership + active `qemu:///system` access) and records the resolved SSH identity file in `connection.ssh_key_path`.
 
 2. **Per-VM Detailed Profiling**:
    * Inspects all defined libvirt domains on the target host.

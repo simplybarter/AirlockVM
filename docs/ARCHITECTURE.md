@@ -15,6 +15,7 @@ AirlockVM enforces a strict separation of concerns between code authoring and wo
 ### Tier 2: Dedicated Execution Hypervisor
 * **Responsibility**: Dedicated physical server or isolated local hypervisor executing hardware-accelerated Linux KVM (`/dev/kvm`).
 * **Function**: Hosts the guest virtual machines, provides bridged network traffic, and isolates guest execution environments from local workstations.
+* **Zero-`sudo` (Rootless) Execution Mode**: Remote hypervisors can run under a dedicated non-privileged user in `libvirt` and `kvm` groups (zero `sudo`), using a dedicated ACL-enabled storage pool (`/var/lib/libvirt/airlock`), user-level systemd socket proxies (`~/.config/systemd/user/` with `loginctl enable-linger`), and `connection.ssh_key_path` recorded in `vmhost.yaml` (see [docs/SECURITY.md](SECURITY.md)).
 
 ---
 
@@ -24,7 +25,7 @@ To prevent guest execution environments from overwhelming hypervisor resources:
 
 * **vCPU Capacity**: The provisioning engine dynamically measures available host CPU threads and allocates balanced core counts (typically 50% of host capacity), leaving remaining cores reserved for the host OS.
 * **Memory Allocation**: Guest RAM is budgeted proportionally (~25% of total host RAM) across standardized memory tiers (2 GB, 4 GB, 8 GB, 16 GB, 32 GB), preventing out-of-memory kernel panics on shared physical hosts.
-* **Storage Thin Provisioning**: Virtual machine disk images use the `qcow2` format, enabling dynamic copy-on-write allocation and rapid baseline snapshots (`virsh snapshot-create-as`).
+* **Storage Thin Provisioning**: Virtual machine disk images use the `qcow2` format backed by either the official Ubuntu 24.04 cloud-init base image or a pre-baked golden image (`airlock-golden-ubuntu-24.04.qcow2` via `airlock bake-image`), enabling copy-on-write allocation, fast-boot provisioning, rapid baseline snapshots (`airlock_snapshot`), and full chain consolidation (`action="flatten"`).
 
 ---
 
