@@ -1775,6 +1775,22 @@ class TestMitigationsUnit(unittest.TestCase):
                 else:
                     os.environ.pop("AIRLOCK_INVENTORY_DIR", None)
 
+        # 4. add_vmhost.resolve_host_ssh_key resolves explicit or ssh -G identityfile and skips localhost
+        add_mod = _load_module(
+            "add_vmhost_ssh_key_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_inventory" / "scripts" / "add_vmhost.py",
+        )
+        self.assertEqual(add_mod.resolve_host_ssh_key("localhost"), "")
+        with tempfile.TemporaryDirectory() as td:
+            fake_key = Path(td) / "airlock_hv_ed25519"
+            fake_key.write_text("KEY", encoding="utf-8")
+            with patch.object(
+                add_mod.subprocess,
+                "run",
+                return_value=MagicMock(returncode=0, stdout=f"user airlock\nidentityfile {fake_key}\n", stderr=""),
+            ):
+                self.assertEqual(add_mod.resolve_host_ssh_key("rootless-hv"), str(fake_key))
+
 
 if __name__ == "__main__":
     unittest.main()

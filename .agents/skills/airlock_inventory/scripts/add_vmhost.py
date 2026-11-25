@@ -90,6 +90,43 @@ def run_cmd(
         return 1, "", str(e)
 
 
+def _format_home_path(raw_path: str) -> str:
+    """Formats a local path using ~/ when inside the user's home directory."""
+    if not raw_path:
+        return ""
+    expanded = Path(os.path.expanduser(raw_path))
+    try:
+        return f"~/{expanded.resolve().relative_to(Path.home().resolve())}"
+    except ValueError:
+        return raw_path
+
+
+def resolve_host_ssh_key(host: str, explicit_key: str | None = None) -> str:
+    """Resolves the local SSH private key path used to authenticate to a remote hypervisor."""
+    if host in ("localhost", "127.0.0.1"):
+        return ""
+    if explicit_key:
+        return _format_home_path(explicit_key)
+    try:
+        res = subprocess.run(
+            ["ssh", "-G", host],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                if line.lower().startswith("identityfile "):
+                    cand = line.split(None, 1)[1].strip()
+                    if cand and Path(os.path.expanduser(cand)).exists():
+                        return _format_home_path(cand)
+    except Exception:
+        pass
+    return ""
+
+
 def probe_host(host: str, user: str | None = None, port: int = 22, key: str | None = None) -> dict:
     """Probes the target hypervisor host for hardware, OS, and libvirt specs."""
     data = {
@@ -97,6 +134,7 @@ def probe_host(host: str, user: str | None = None, port: int = 22, key: str | No
         "is_remote": host not in ("localhost", "127.0.0.1"),
         "user": user or "",
         "port": port,
+        "ssh_key_path": resolve_host_ssh_key(host, explicit_key=key),
     }
 
     # 1. Connectivity test & privilege mode detection (sudo vs rootless libvirt)
@@ -639,6 +677,7 @@ def render_vmhost_yaml(host_data: dict, vm_records: list[dict], template_path: P
         "SSH_HOST": ssh_host,
         "SSH_PORT": str(ssh_port),
         "SSH_USER": ssh_user,
+        "SSH_KEY_PATH": host_data.get("ssh_key_path", ""),
         "PRIVILEGE_MODE": host_data.get("privilege_mode", "sudo"),
         "HOSTNAME": host_data["hostname"],
         "FQDN": host_data["fqdn"],

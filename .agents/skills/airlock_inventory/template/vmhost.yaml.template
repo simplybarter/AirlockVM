@@ -11,6 +11,7 @@ vmhost:
     host: "{{ SSH_HOST }}"
     port: {{ SSH_PORT }}
     user: "{{ SSH_USER }}"
+    ssh_key_path: "{{ SSH_KEY_PATH }}"
     privilege_mode: "{{ PRIVILEGE_MODE }}"
   system:
     hostname: "{{ HOSTNAME }}"
