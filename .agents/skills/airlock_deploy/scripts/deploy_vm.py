@@ -546,6 +546,230 @@ def bake_golden_image(
     return 0
 
 
+def _is_local_host(host: str | None) -> bool:
+    """Returns True when host targets the local machine."""
+    return not host or host.strip().lower() in ("localhost", "127.0.0.1", "::1")
+
+
+def _list_inventory_hosts() -> list[str]:
+    """Lists registered hypervisor hosts across active inventory search paths."""
+    search_dirs: list[Path] = []
+    if "AIRLOCK_INVENTORY_DIR" in os.environ:
+        search_dirs.append(Path(os.environ["AIRLOCK_INVENTORY_DIR"]).expanduser().resolve())
+    default_dir = Path.home() / ".airlock" / "inventory"
+    if default_dir not in search_dirs:
+        search_dirs.append(default_dir)
+
+    hosts: set[str] = set()
+    for inv_dir in search_dirs:
+        if not inv_dir.exists():
+            continue
+        for entry in inv_dir.iterdir():
+            if entry.is_dir() and (entry / "vmhost.yaml").exists():
+                hosts.add(entry.name)
+    return sorted(hosts)
+
+
+def find_golden_image_on_host(host: str) -> str | None:
+    """Checks if a pre-baked golden image exists on the given hypervisor and returns its path."""
+    storage_dir = resolve_storage_dir(host)
+    candidates = [
+        f"{storage_dir}/{GOLDEN_IMAGE_FILENAME}",
+        f"/var/lib/libvirt/images/{GOLDEN_IMAGE_FILENAME}",
+    ]
+    seen: set[str] = set()
+    for cand in candidates:
+        if cand in seen:
+            continue
+        seen.add(cand)
+        ret, _, _ = run_cmd_status(["test", "-f", cand], host=host)
+        if ret == 0:
+            return cand
+    return None
+
+
+def discover_golden_image_source(
+    target_host: str,
+    source_host: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Finds a source hypervisor and path that already holds the golden image.
+
+    If source_host is provided, checks only that host. Otherwise scans registered
+    inventory hypervisors (plus localhost as fallback when targeting a remote host).
+    """
+    target_is_local = _is_local_host(target_host)
+
+    if source_host:
+        if source_host == target_host or (_is_local_host(source_host) and target_is_local):
+            return source_host, None
+        return source_host, find_golden_image_on_host(source_host)
+
+    candidates = [
+        h for h in _list_inventory_hosts()
+        if h != target_host and not (_is_local_host(h) and target_is_local)
+    ]
+    if not target_is_local and not any(_is_local_host(h) for h in candidates):
+        candidates.append("localhost")
+
+    for cand in candidates:
+        img_path = find_golden_image_on_host(cand)
+        if img_path:
+            return cand, img_path
+
+    return None, None
+
+
+def seed_golden_image(
+    target_host: str,
+    source_host: str | None = None,
+    target_dir: str | None = None,
+    dry_run: bool = False,
+    force: bool = False,
+) -> int:
+    """Seeds a target hypervisor with an already-established golden image from an existing vmhost."""
+    storage_dir = target_dir or resolve_storage_dir(target_host)
+    dest_path = f"{storage_dir}/{GOLDEN_IMAGE_FILENAME}"
+    tmp_path = f"{storage_dir}/.{GOLDEN_IMAGE_FILENAME}.tmp"
+
+    print("============================================================")
+    print(f" AirlockVM Golden Base Image Seeder -> {target_host}")
+    print(f" Target Image: {dest_path}")
+    print("============================================================")
+
+    if not force:
+        ret_exists, _, _ = run_cmd_status(["test", "-f", dest_path], host=target_host)
+        if ret_exists == 0:
+            print(f"[✓] Golden image already exists on {target_host}: {dest_path}")
+            print("    Use --force to overwrite it from an existing vmhost.")
+            return 0
+
+    if source_host and (source_host == target_host or (_is_local_host(source_host) and _is_local_host(target_host))):
+        print(f"[-] Error: Source host '{source_host}' cannot be the same as target host '{target_host}'.", file=sys.stderr)
+        return 1
+
+    resolved_source, src_path = discover_golden_image_source(target_host, source_host=source_host)
+    if not resolved_source or not src_path:
+        if source_host:
+            print(
+                f"[-] Error: Golden image '{GOLDEN_IMAGE_FILENAME}' not found on source host '{source_host}'.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"[-] Error: No registered hypervisor with '{GOLDEN_IMAGE_FILENAME}' was found to seed '{target_host}'.",
+                file=sys.stderr,
+            )
+        print(
+            f"    Bake a golden image first with: deploy_vm.py --bake-golden --host <existing_vmhost>",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"    [✓] Source Host : {resolved_source}")
+    print(f"    [✓] Source Image: {src_path}")
+
+    src_rootless = is_rootless_host(resolved_source)
+    ret_readable, _, _ = run_cmd_status(["test", "-r", src_path], host=resolved_source)
+    src_sudo = "" if (ret_readable == 0 or src_rootless) else "sudo "
+
+    dst_rootless = is_rootless_host(target_host)
+    dst_sudo = "" if dst_rootless else "sudo "
+    chown_step = "" if dst_rootless else f"sudo chown libvirt-qemu:kvm {shlex.quote(tmp_path)} || true; "
+
+    if dry_run:
+        print(f"    [PLAN] Compute SHA-256 checksum on {resolved_source}:{src_path}")
+        print(f"    [PLAN] Stream {resolved_source}:{src_path} -> {target_host}:{tmp_path}")
+        print(f"    [PLAN] Verify SHA-256 checksum on {target_host}:{tmp_path}")
+        print(f"    [PLAN] Publish atomically to {target_host}:{dest_path} (chmod 664)")
+        print("[✓] Dry-run complete. Re-run without --dry-run to seed golden image.")
+        return 0
+
+    print(f"[*] Computing SHA-256 checksum on source host '{resolved_source}'...")
+    ret_hash, src_hash_out, src_hash_err = run_cmd_status(
+        ["bash", "-c", f"{src_sudo}sha256sum {shlex.quote(src_path)} | awk '{{print $1}}'"],
+        host=resolved_source,
+    )
+    src_sha256 = src_hash_out.strip().split()[0] if (ret_hash == 0 and src_hash_out.strip()) else ""
+    if ret_hash != 0 or not src_sha256:
+        print(f"[-] Failed to compute source checksum on '{resolved_source}': {src_hash_err}", file=sys.stderr)
+        return 1
+    print(f"    [✓] Source SHA-256: {src_sha256[:16]}...")
+
+    if _is_local_host(resolved_source):
+        reader_cmd = ["sudo", "cat", src_path] if src_sudo else ["cat", src_path]
+    else:
+        reader_cmd = [
+            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+            resolved_source, f"{src_sudo}cat {shlex.quote(src_path)}",
+        ]
+
+    write_script = (
+        f"set -euo pipefail; "
+        f"{dst_sudo}mkdir -p {shlex.quote(storage_dir)}; "
+        f"{dst_sudo}rm -f {shlex.quote(tmp_path)}; "
+        f"{dst_sudo}dd of={shlex.quote(tmp_path)} bs=4M status=none"
+    )
+    if _is_local_host(target_host):
+        writer_cmd = ["bash", "-c", write_script]
+    else:
+        writer_cmd = [
+            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+            target_host, write_script,
+        ]
+
+    print(f"[*] Streaming golden image from '{resolved_source}' to '{target_host}'...")
+    try:
+        p_src = subprocess.Popen(reader_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p_dst = subprocess.Popen(writer_cmd, stdin=p_src.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert p_src.stdout is not None
+        p_src.stdout.close()
+        _, dst_err_bytes = p_dst.communicate()
+        _, src_err_bytes = p_src.communicate()
+    except Exception as e:
+        print(f"[-] Image transfer failed: {e}", file=sys.stderr)
+        run_cmd_status(priv_cmd(target_host, "rm", "-f", tmp_path), host=target_host)
+        return 1
+
+    if p_src.returncode != 0 or p_dst.returncode != 0:
+        src_err = (src_err_bytes or b"").decode("utf-8", errors="replace").strip()
+        dst_err = (dst_err_bytes or b"").decode("utf-8", errors="replace").strip()
+        print(f"[-] Image transfer failed (src rc={p_src.returncode}, dst rc={p_dst.returncode}): {src_err} {dst_err}".strip(), file=sys.stderr)
+        run_cmd_status(priv_cmd(target_host, "rm", "-f", tmp_path), host=target_host)
+        return 1
+
+    print(f"[*] Verifying SHA-256 checksum on target host '{target_host}'...")
+    ret_dhash, dst_hash_out, dst_hash_err = run_cmd_status(
+        ["bash", "-c", f"{dst_sudo}sha256sum {shlex.quote(tmp_path)} | awk '{{print $1}}'"],
+        host=target_host,
+    )
+    dst_sha256 = dst_hash_out.strip().split()[0] if (ret_dhash == 0 and dst_hash_out.strip()) else ""
+    if ret_dhash != 0 or dst_sha256 != src_sha256:
+        print(
+            f"[-] Checksum verification failed on '{target_host}' "
+            f"(expected {src_sha256[:16]}..., got {(dst_sha256[:16] + '...') if dst_sha256 else 'none'}): {dst_hash_err}",
+            file=sys.stderr,
+        )
+        run_cmd_status(priv_cmd(target_host, "rm", "-f", tmp_path), host=target_host)
+        return 1
+
+    publish_script = (
+        f"set -euo pipefail; "
+        f"{chown_step}"
+        f"{dst_sudo}chmod 664 {shlex.quote(tmp_path)} || true; "
+        f"{dst_sudo}mv {shlex.quote(tmp_path)} {shlex.quote(dest_path)}"
+    )
+    ret_pub, _, pub_err = run_cmd_status(["bash", "-c", publish_script], host=target_host)
+    if ret_pub != 0:
+        print(f"[-] Failed to publish golden image on '{target_host}': {pub_err}", file=sys.stderr)
+        run_cmd_status(priv_cmd(target_host, "rm", "-f", tmp_path), host=target_host)
+        return 1
+
+    print(f"[✓] Golden image successfully seeded on '{target_host}': {dest_path}")
+    print(f"    Source: {resolved_source}:{src_path} (SHA-256 verified)")
+    print("    New VMs on this hypervisor will now clone from this golden image and skip package installation.")
+    return 0
+
+
 def resolve_base_cloud_image(host: str, target_dir: str, dry_run: bool = False) -> str:
     """Finds existing Noble cloud image or downloads it to the hypervisor."""
     candidates = [
@@ -1999,14 +2223,25 @@ def main():
     parser.add_argument("--doc", type=Path, default=None, help="Path to supplementary runbook markdown or custom specification")
     parser.add_argument("--boot-timeout", type=int, default=240, help="Seconds to wait for guest SSH readiness after provisioning (default: 240)")
     parser.add_argument("--bake-golden", action="store_true", help="Pre-bake a golden Ubuntu 24.04 qcow2 base image on the hypervisor")
-    parser.add_argument("--host", type=str, default="localhost", help="Target hypervisor host for --bake-golden (default: localhost)")
-    parser.add_argument("--force", action="store_true", help="Force overwrite when used with --bake-golden")
+    parser.add_argument("--seed-golden", action="store_true", help="Seed a target hypervisor with an already-established golden image from an existing vmhost")
+    parser.add_argument("--source-host", type=str, default=None, help="Source hypervisor host for --seed-golden (auto-discovered from inventory if omitted)")
+    parser.add_argument("--host", type=str, default="localhost", help="Target hypervisor host for --bake-golden or --seed-golden (default: localhost)")
+    parser.add_argument("--force", action="store_true", help="Force overwrite when used with --bake-golden or --seed-golden")
     parser.add_argument("--no-golden", action="store_true", help="Ignore pre-baked golden image and deploy from raw Ubuntu cloud image")
     args = parser.parse_args()
 
-    # Handle standalone --bake-golden before requiring a vm.yaml
+    # Handle standalone --bake-golden / --seed-golden before requiring a vm.yaml
     if args.bake_golden:
         sys.exit(bake_golden_image(host=args.host, dry_run=args.dry_run, force=args.force))
+    if args.seed_golden:
+        sys.exit(
+            seed_golden_image(
+                target_host=args.host,
+                source_host=args.source_host,
+                dry_run=args.dry_run,
+                force=args.force,
+            )
+        )
 
     if args.config:
         config_path = args.config

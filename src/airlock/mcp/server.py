@@ -44,6 +44,7 @@ from airlock.transport import get_python_bin, resolve_asset_path, resolve_sync_d
 AIRLOCK_ROOT = Path(__file__).resolve().parents[3]
 DEPLOY_SCRIPT = resolve_asset_path(".agents/skills/airlock_deploy/scripts/deploy_vm.py", AIRLOCK_ROOT)
 CONFIGURE_SCRIPT = resolve_asset_path(".agents/skills/airlock_configure/scripts/configure_vm.py", AIRLOCK_ROOT)
+ADD_VMHOST_SCRIPT = resolve_asset_path(".agents/skills/airlock_inventory/scripts/add_vmhost.py", AIRLOCK_ROOT)
 GENERATE_SYNC_SCRIPT = resolve_asset_path(".agents/skills/airlock_rsync/scripts/generate_sync.py", AIRLOCK_ROOT)
 ROOT_DISPATCHER = resolve_sync_dispatcher(AIRLOCK_ROOT)
 PYTHON_BIN = get_python_bin(AIRLOCK_ROOT)
@@ -1342,6 +1343,112 @@ def airlock_bake_image(
     res["host"] = vmhost
     res["dry_run"] = dry_run
     return res
+
+
+@server.tool()
+def airlock_seed_image(
+    target_host: str,
+    source_host: str = "",
+    force: bool = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Seeds a target hypervisor with an already-established AirlockVM golden base image from an existing vmhost.
+
+    Streams the pre-baked Ubuntu 24.04 qcow2 golden image (airlock-golden-ubuntu-24.04.qcow2) from an
+    existing registered hypervisor to the target hypervisor, verifies SHA-256 integrity, and publishes
+    it atomically without requiring virt-customize or re-baking on the target host.
+
+    Args:
+        target_host: Destination hypervisor host ('localhost' or remote SSH alias) to seed.
+        source_host: Optional source hypervisor host holding the golden image. Auto-discovered from
+            registered inventory hypervisors if omitted.
+        force: Overwrite an existing golden image on the target hypervisor if already present.
+        dry_run: Preview the image seeding plan without transferring files.
+    """
+    try:
+        safe_target = validate_identifier(target_host, "target_host")
+        safe_source = validate_identifier(source_host, "source_host") if source_host.strip() else ""
+    except ValueError as e:
+        return {"success": False, "error": str(e), "target_host": target_host}
+
+    cmd = [str(PYTHON_BIN), str(DEPLOY_SCRIPT), "--seed-golden", "--host", safe_target]
+    if safe_source:
+        cmd.extend(["--source-host", safe_source])
+    if force:
+        cmd.append("--force")
+    if dry_run:
+        cmd.append("--dry-run")
+
+    res = _run_command(cmd, timeout=1800)
+    res["target_host"] = safe_target
+    res["source_host"] = safe_source or "auto"
+    res["dry_run"] = dry_run
+    return res
+
+
+@server.tool()
+def airlock_add_vmhost(
+    host: str,
+    user: str = "",
+    port: int = 22,
+    key: str = "",
+    seed_image: bool = False,
+    seed_from: str = "",
+    force_seed: bool = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Discovers and registers a hypervisor host in inventory, optionally seeding it with an existing golden image.
+
+    Probes hardware, libvirt, storage pools, networks, and existing domains on the hypervisor and writes
+    inventory/{host}/vmhost.yaml. When seed_image=True (or seed_from is specified), subsequently streams
+    the established golden base image from an existing registered hypervisor to the new host.
+
+    Args:
+        host: Hypervisor hostname, IP, or SSH alias (e.g. 'localhost' or 'remotehost').
+        user: Optional SSH username for remote hypervisor discovery.
+        port: SSH port (default: 22).
+        key: Optional path to SSH private key file.
+        seed_image: If True, seed the newly added hypervisor with the golden image from an existing vmhost.
+        seed_from: Optional explicit source hypervisor host to copy the golden image from (implies seed_image=True).
+        force_seed: Overwrite an existing golden image on the target hypervisor during seeding.
+        dry_run: Preview host registration (and image seeding if requested) without modifying files or storage.
+    """
+    try:
+        safe_host = validate_identifier(host, "host")
+        safe_seed_from = validate_identifier(seed_from, "seed_from") if seed_from.strip() else ""
+    except ValueError as e:
+        return {"success": False, "error": str(e), "host": host}
+
+    cmd = [str(PYTHON_BIN), str(ADD_VMHOST_SCRIPT), safe_host]
+    if user.strip():
+        cmd.extend(["--user", user.strip()])
+    if port and port != 22:
+        cmd.extend(["--port", str(port)])
+    if key.strip():
+        cmd.extend(["--key", key.strip()])
+    if dry_run:
+        cmd.append("--dry-run")
+
+    inv_res = _run_command(cmd, timeout=120)
+    result: dict[str, Any] = {
+        "success": inv_res["success"],
+        "host": safe_host,
+        "dry_run": dry_run,
+        "inventory": inv_res,
+    }
+
+    should_seed = bool(seed_image or safe_seed_from)
+    if inv_res["success"] and should_seed:
+        seed_res = airlock_seed_image(
+            target_host=safe_host,
+            source_host=safe_seed_from,
+            force=force_seed,
+            dry_run=dry_run,
+        )
+        result["image_seed"] = seed_res
+        result["success"] = bool(inv_res["success"] and seed_res.get("success"))
+
+    return result
 
 
 def main() -> None:

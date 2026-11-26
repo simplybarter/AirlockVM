@@ -12,6 +12,7 @@ import subprocess
 import sys
 
 from airlock.mcp.server import (
+    airlock_add_vmhost,
     airlock_audit_drift,
     airlock_audit_security,
     airlock_bake_image,
@@ -22,6 +23,7 @@ from airlock.mcp.server import (
     airlock_ping,
     airlock_preflight,
     airlock_purge_vm,
+    airlock_seed_image,
     airlock_snapshot,
     airlock_status,
     airlock_update_vm,
@@ -252,6 +254,49 @@ def cmd_bake_image(args: argparse.Namespace) -> int:
     return 0 if res.get("success") else 1
 
 
+def cmd_seed_image(args: argparse.Namespace) -> int:
+    res = airlock_seed_image(
+        target_host=args.host,
+        source_host=args.source_host or "",
+        force=args.force,
+        dry_run=args.dry_run,
+    )
+    if res.get("stdout"):
+        print(res["stdout"])
+    if res.get("stderr"):
+        print(res["stderr"], file=sys.stderr)
+    if not res.get("success") and res.get("error"):
+        print(f"Error: {res['error']}", file=sys.stderr)
+    return 0 if res.get("success") else 1
+
+
+def cmd_add_host(args: argparse.Namespace) -> int:
+    res = airlock_add_vmhost(
+        host=args.host,
+        user=args.user or "",
+        port=args.port,
+        key=args.key or "",
+        seed_image=args.seed_image,
+        seed_from=args.seed_from or "",
+        force_seed=args.force_seed,
+        dry_run=args.dry_run,
+    )
+    inv = res.get("inventory") or {}
+    if inv.get("stdout"):
+        print(inv["stdout"])
+    if inv.get("stderr"):
+        print(inv["stderr"], file=sys.stderr)
+    seed = res.get("image_seed")
+    if seed:
+        if seed.get("stdout"):
+            print(seed["stdout"])
+        if seed.get("stderr"):
+            print(seed["stderr"], file=sys.stderr)
+    if not res.get("success") and res.get("error"):
+        print(f"Error: {res['error']}", file=sys.stderr)
+    return 0 if res.get("success") else 1
+
+
 def cmd_hosts(args: argparse.Namespace) -> int:
     res = airlock_list_hypervisors(live_probe=args.live)
     hosts = res.get("hypervisors", [])
@@ -403,6 +448,24 @@ def main(argv: list[str] | None = None) -> int:
     p_bake.add_argument("--force", action="store_true", help="Overwrite existing golden base image")
     p_bake.add_argument("--dry-run", action="store_true", help="Preview golden image baking plan")
 
+    # seed-image
+    p_seed = subparsers.add_parser("seed-image", help="Seed a hypervisor with an already-established golden image from an existing vmhost")
+    p_seed.add_argument("host", help="Target hypervisor host to seed")
+    p_seed.add_argument("--source-host", default="", help="Source hypervisor host holding the golden image (auto-discovered if omitted)")
+    p_seed.add_argument("--force", action="store_true", help="Overwrite existing golden base image on target host")
+    p_seed.add_argument("--dry-run", action="store_true", help="Preview golden image seeding plan")
+
+    # add-host
+    p_add_host = subparsers.add_parser("add-host", help="Discover and register a hypervisor host in inventory")
+    p_add_host.add_argument("host", help="Hypervisor hostname, IP, or SSH alias")
+    p_add_host.add_argument("--user", "-u", default="", help="SSH user (if remote)")
+    p_add_host.add_argument("--port", "-p", type=int, default=22, help="SSH port (default: 22)")
+    p_add_host.add_argument("--key", "-i", default="", help="Path to SSH private key")
+    p_add_host.add_argument("--seed-image", action="store_true", help="Seed the hypervisor with an established golden image from an existing vmhost")
+    p_add_host.add_argument("--seed-from", default="", help="Explicit source vmhost for --seed-image (auto-discovered if omitted)")
+    p_add_host.add_argument("--force-seed", action="store_true", help="Overwrite an existing golden image on target host when seeding")
+    p_add_host.add_argument("--dry-run", action="store_true", help="Preview host discovery (and seeding if requested) without writing")
+
     # hosts
     p_hosts = subparsers.add_parser("hosts", help="List registered hypervisors and their resource capacity")
     p_hosts.add_argument("--live", action="store_true", help="Probe hypervisors live for current available RAM and CPU load")
@@ -448,6 +511,8 @@ def main(argv: list[str] | None = None) -> int:
         "audit-security": cmd_audit_security,
         "exec": cmd_exec,
         "bake-image": cmd_bake_image,
+        "seed-image": cmd_seed_image,
+        "add-host": cmd_add_host,
     }
 
     handler = commands.get(args.command)

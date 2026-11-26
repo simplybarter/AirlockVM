@@ -154,6 +154,10 @@ python3 .agents/skills/airlock_deploy/scripts/deploy_vm.py --flatten-snapshots -
 
 # Pre-bake a golden Ubuntu 24.04 cloud-init base image on a hypervisor:
 python3 .agents/skills/airlock_deploy/scripts/deploy_vm.py --bake-golden --host remotehost
+
+# Seed a new hypervisor with an already-established golden image from an existing vmhost:
+python3 .agents/skills/airlock_deploy/scripts/deploy_vm.py --seed-golden --host remotehost
+python3 .agents/skills/airlock_deploy/scripts/deploy_vm.py --seed-golden --host remotehost --source-host localhost
 ```
 
 ---

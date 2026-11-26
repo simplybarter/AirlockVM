@@ -997,6 +997,9 @@ def main():
     parser.add_argument("--key", "-i", default=None, help="Path to SSH private key")
     parser.add_argument("--vm", help="Target a specific VM name on the host instead of all domains")
     parser.add_argument("--inventory-dir", type=Path, default=DEFAULT_INVENTORY_ROOT, help="Base inventory directory")
+    parser.add_argument("--seed-image", action="store_true", help="Seed the hypervisor with an already-established golden image from an existing vmhost")
+    parser.add_argument("--seed-from", default=None, help="Explicit source vmhost for --seed-image (auto-discovered from inventory if omitted)")
+    parser.add_argument("--force-seed", action="store_true", help="Overwrite an existing golden image on the target hypervisor when used with --seed-image")
     parser.add_argument("--dry-run", action="store_true", help="Inspect and preview without writing files")
 
     args = parser.parse_args()
@@ -1020,6 +1023,26 @@ def main():
         for v in res["vm_records"]:
             print(f"   • {v['name']} ({v['state']}) -> inventory/{args.host}/{v['name']}/vm.yaml")
         print("=" * 60 + "\n")
+
+        if args.seed_image or args.seed_from:
+            deploy_script = REPO_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py"
+            seed_cmd = [sys.executable, str(deploy_script), "--seed-golden", "--host", args.host]
+            if args.seed_from:
+                seed_cmd.extend(["--source-host", args.seed_from])
+            if args.force_seed:
+                seed_cmd.append("--force")
+            if args.dry_run:
+                seed_cmd.append("--dry-run")
+            seed_env = os.environ.copy()
+            seed_env["AIRLOCK_INVENTORY_DIR"] = str(args.inventory_dir)
+            seed_proc = subprocess.run(seed_cmd, env=seed_env, check=False)
+            if seed_proc.returncode != 0:
+                print(
+                    f"[-] Host '{args.host}' was registered, but golden image seeding failed (exit code {seed_proc.returncode}).",
+                    file=sys.stderr,
+                )
+                sys.exit(seed_proc.returncode)
+
         sys.exit(0)
 
     except Exception as e:

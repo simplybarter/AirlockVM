@@ -100,6 +100,8 @@ The Model Context Protocol control plane exposes a complete tool suite for codin
    * `airlock_deploy_app(vm_name, offline)`: Rsyncs application code and launches workloads inside the VM.
    * `airlock_exec(vm_name, command, workdir, timeout)`: Executes build, test, or diagnostic shell commands inside the isolated guest VM.
    * `airlock_bake_image(vmhost, force, dry_run)`: Pre-bakes a golden Ubuntu 24.04 `qcow2` base image on the hypervisor for fast-boot VM cloning.
+   * `airlock_seed_image(target_host, source_host, force, dry_run)`: Seeds a target hypervisor with an already-established golden `qcow2` base image streamed from an existing registered `vmhost` with SHA-256 verification.
+   * `airlock_add_vmhost(host, user, port, key, seed_image, seed_from, force_seed, dry_run)`: Discovers and registers a hypervisor in inventory and optionally seeds it with the golden image from an existing `vmhost`.
    * `airlock_audit_drift(vm_name)`: Compares live hypervisor state against the `vm.yaml` SSOT to identify domain, network, or proxy drift.
    * `airlock_reconcile(vm_name, strategy)`: Reconciles detected drift between `vm.yaml` SSOT and the live hypervisor.
    * `airlock_diagnose(vm_name)`: Performs root-cause failure analysis on stalled workloads and recommends rollbacks.

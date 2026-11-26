@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import os
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 import tempfile
 import unittest
@@ -1888,6 +1888,179 @@ class TestMitigationsUnit(unittest.TestCase):
         self.assertTrue(res["healthy"])
         self.assertEqual(res["url"], "http://192.168.1.50:8000/")
         mock_http.assert_called_once_with("192.168.1.50", 8000, timeout=3)
+
+    def test_seed_golden_image_auto_discovers_streams_verifies_and_publishes(self):
+        deploy_mod = _load_module(
+            "deploy_vm_seed_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py",
+        )
+        fake_sha = "a" * 64
+        captured_runs: list[tuple[str | None, list[str]]] = []
+
+        def fake_run(cmd, host=None):
+            captured_runs.append((host, list(cmd)))
+            if cmd[:2] == ["test", "-f"]:
+                # Golden image exists on sourcehost, not on newhost
+                if host == "sourcehost" and "airlock-golden" in cmd[2]:
+                    return 0, "", ""
+                return 1, "", ""
+            if cmd[:2] == ["test", "-r"]:
+                return 0, "", ""
+            if cmd[:2] == ["bash", "-c"] and "sha256sum" in cmd[2]:
+                return 0, fake_sha, ""
+            return 0, "", ""
+
+        p_src = MagicMock()
+        p_src.stdout = MagicMock()
+        p_src.returncode = 0
+        p_src.communicate.return_value = (b"", b"")
+
+        p_dst = MagicMock()
+        p_dst.returncode = 0
+        p_dst.communicate.return_value = (b"", b"")
+
+        popen_cmds: list[list[str]] = []
+
+        def fake_popen(cmd, **kwargs):
+            popen_cmds.append(list(cmd))
+            return p_src if len(popen_cmds) == 1 else p_dst
+
+        with patch.object(deploy_mod, "_list_inventory_hosts", return_value=["sourcehost", "newhost"]), \
+             patch.object(deploy_mod, "resolve_storage_dir", return_value="/var/lib/libvirt/airlock"), \
+             patch.object(deploy_mod, "is_rootless_host", return_value=True), \
+             patch.object(deploy_mod, "run_cmd_status", side_effect=fake_run), \
+             patch.object(deploy_mod.subprocess, "Popen", side_effect=fake_popen), \
+             redirect_stdout(io.StringIO()):
+            rc = deploy_mod.seed_golden_image("newhost")
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(popen_cmds), 2)
+        self.assertIn("sourcehost", popen_cmds[0])
+        self.assertIn("newhost", popen_cmds[1])
+        self.assertIn("dd of=/var/lib/libvirt/airlock/.airlock-golden-ubuntu-24.04.qcow2.tmp", popen_cmds[1][-1])
+        # Verify atomic publish command ran on target without sudo (rootless)
+        publish_cmds = [
+            cmd[2] for h, cmd in captured_runs
+            if h == "newhost" and cmd[:2] == ["bash", "-c"] and "mv " in cmd[2]
+        ]
+        self.assertEqual(len(publish_cmds), 1)
+        self.assertNotIn("sudo ", publish_cmds[0])
+        self.assertIn("airlock-golden-ubuntu-24.04.qcow2", publish_cmds[0])
+
+    def test_seed_golden_image_dry_run_and_checksum_mismatch_and_self_guard(self):
+        deploy_mod = _load_module(
+            "deploy_vm_seed_edge_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py",
+        )
+
+        # 1. Self-seeding is rejected
+        with patch.object(deploy_mod, "resolve_storage_dir", return_value="/var/lib/libvirt/airlock"), \
+             patch.object(deploy_mod, "run_cmd_status", return_value=(1, "", "")), \
+             redirect_stdout(io.StringIO()), \
+             redirect_stderr(io.StringIO()):
+            self.assertEqual(deploy_mod.seed_golden_image("remotehost", source_host="remotehost"), 1)
+
+        # 2. Dry-run succeeds without spawning Popen
+        def fake_run_dry(cmd, host=None):
+            if cmd[:2] == ["test", "-f"]:
+                return (0, "", "") if host == "localhost" else (1, "", "")
+            if cmd[:2] == ["test", "-r"]:
+                return 0, "", ""
+            return 0, "", ""
+
+        with patch.object(deploy_mod, "resolve_storage_dir", return_value="/var/lib/libvirt/airlock"), \
+             patch.object(deploy_mod, "is_rootless_host", return_value=True), \
+             patch.object(deploy_mod, "run_cmd_status", side_effect=fake_run_dry), \
+             patch.object(deploy_mod.subprocess, "Popen") as mock_popen, \
+             redirect_stdout(io.StringIO()):
+            rc = deploy_mod.seed_golden_image("remotehost", source_host="localhost", dry_run=True)
+        self.assertEqual(rc, 0)
+        mock_popen.assert_not_called()
+
+        # 3. Checksum mismatch cleans up tmp file and fails
+        cleaned_paths: list[list[str]] = []
+
+        def fake_run_mismatch(cmd, host=None):
+            if cmd[:2] == ["test", "-f"]:
+                return (0, "", "") if host == "localhost" else (1, "", "")
+            if cmd[:2] == ["test", "-r"]:
+                return 0, "", ""
+            if cmd[:2] == ["bash", "-c"] and "sha256sum" in cmd[2]:
+                return (0, "1" * 64, "") if host == "localhost" else (0, "2" * 64, "")
+            if "rm" in cmd:
+                cleaned_paths.append(list(cmd))
+            return 0, "", ""
+
+        p_src = MagicMock(stdout=MagicMock(), returncode=0)
+        p_src.communicate.return_value = (b"", b"")
+        p_dst = MagicMock(returncode=0)
+        p_dst.communicate.return_value = (b"", b"")
+
+        with patch.object(deploy_mod, "resolve_storage_dir", return_value="/var/lib/libvirt/airlock"), \
+             patch.object(deploy_mod, "is_rootless_host", return_value=True), \
+             patch.object(deploy_mod, "run_cmd_status", side_effect=fake_run_mismatch), \
+             patch.object(deploy_mod.subprocess, "Popen", side_effect=[p_src, p_dst]), \
+             redirect_stdout(io.StringIO()), \
+             redirect_stderr(io.StringIO()):
+            rc = deploy_mod.seed_golden_image("remotehost", source_host="localhost")
+        self.assertEqual(rc, 1)
+        self.assertTrue(any(".airlock-golden-ubuntu-24.04.qcow2.tmp" in " ".join(c) for c in cleaned_paths))
+
+    def test_mcp_add_vmhost_and_seed_image_and_cli_dispatch(self):
+        from airlock import cli as cli_mod
+        from airlock.mcp import server as srv
+
+        # 1. airlock_seed_image builds expected deploy_vm.py command
+        with patch.object(srv, "_run_command", return_value={"success": True, "returncode": 0, "stdout": "seeded", "stderr": ""}) as mock_run:
+            res = srv.airlock_seed_image("newhost", source_host="oldhost", force=True, dry_run=True)
+        self.assertTrue(res["success"])
+        self.assertEqual(res["target_host"], "newhost")
+        self.assertEqual(res["source_host"], "oldhost")
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("--seed-golden", cmd)
+        self.assertIn("--host", cmd)
+        self.assertIn("newhost", cmd)
+        self.assertIn("--source-host", cmd)
+        self.assertIn("oldhost", cmd)
+        self.assertIn("--force", cmd)
+        self.assertIn("--dry-run", cmd)
+
+        # 2. airlock_add_vmhost chains inventory registration + seeding and isolates partial failure
+        with patch.object(srv, "_run_command", side_effect=[
+            {"success": True, "returncode": 0, "stdout": "registered", "stderr": ""},
+            {"success": False, "returncode": 1, "stdout": "", "stderr": "no source image"},
+        ]):
+            res_add = srv.airlock_add_vmhost("newhost", seed_image=True, dry_run=True)
+        self.assertFalse(res_add["success"])
+        self.assertTrue(res_add["inventory"]["success"])
+        self.assertFalse(res_add["image_seed"]["success"])
+
+        # 3. Invalid host identifier is rejected before subprocess execution
+        bad = srv.airlock_seed_image("bad;host")
+        self.assertFalse(bad["success"])
+        self.assertIn("Invalid", bad["error"])
+
+        # 4. CLI subcommands dispatch cleanly
+        with patch.object(cli_mod, "airlock_seed_image", return_value={"success": True, "stdout": "ok", "stderr": ""}) as mock_seed_cli, \
+             redirect_stdout(io.StringIO()):
+            rc = cli_mod.main(["seed-image", "newhost", "--source-host", "oldhost", "--dry-run"])
+        self.assertEqual(rc, 0)
+        mock_seed_cli.assert_called_once_with(target_host="newhost", source_host="oldhost", force=False, dry_run=True)
+
+        with patch.object(cli_mod, "airlock_add_vmhost", return_value={"success": True, "inventory": {"stdout": "ok", "stderr": ""}, "image_seed": {"stdout": "seeded", "stderr": ""}}) as mock_add_cli, \
+             redirect_stdout(io.StringIO()):
+            rc = cli_mod.main(["add-host", "newhost", "--seed-image", "--seed-from", "oldhost", "--dry-run"])
+        self.assertEqual(rc, 0)
+        mock_add_cli.assert_called_once_with(
+            host="newhost",
+            user="",
+            port=22,
+            key="",
+            seed_image=True,
+            seed_from="oldhost",
+            force_seed=False,
+            dry_run=True,
+        )
 
 
 if __name__ == "__main__":

@@ -90,6 +90,12 @@ python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py 192.168.1.50 --us
 
 # Dry-run preview without writing files:
 python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py remotehost --dry-run
+
+# Add a new hypervisor and seed it with the golden image from an existing registered vmhost:
+python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py remotehost --seed-image
+
+# Add a new hypervisor and seed its golden image from a specific source vmhost:
+python3 .agents/skills/airlock_inventory/scripts/add_vmhost.py remotehost --seed-from localhost
 ```
 
 ### 2. Targeting a Specific Virtual Machine
