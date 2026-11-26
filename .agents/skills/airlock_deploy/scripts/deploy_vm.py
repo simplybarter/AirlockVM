@@ -485,7 +485,9 @@ def bake_golden_image(
 
     base_img = resolve_base_cloud_image(host, storage_dir, dry_run=dry_run)
     pkg_csv = ",".join(GOLDEN_PACKAGES)
-    pkg_args = " ".join(shlex.quote(p) for p in GOLDEN_PACKAGES)
+    # Install Node.js 22 LTS (with bundled npm) from NodeSource instead of Ubuntu's older v18 package
+    base_apt_pkgs = [p for p in GOLDEN_PACKAGES if p not in ("nodejs", "npm")] + ["gnupg"]
+    pkg_args = " ".join(shlex.quote(p) for p in base_apt_pkgs)
 
     rootless = is_rootless_host(host)
     sudo_p = "" if rootless else "sudo "
@@ -501,6 +503,9 @@ def bake_golden_image(
         "apt-get upgrade -y -qq -o Dpkg::Options::=--force-confnew; "
         "apt-get clean; "
         f"apt-get install -y -qq -o Dpkg::Options::=--force-confnew {pkg_args}; "
+        "apt-get clean; "
+        "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -; "
+        "apt-get install -y -qq -o Dpkg::Options::=--force-confnew nodejs; "
         "systemctl enable docker qemu-guest-agent; "
         "apt-get clean; "
         "if [ -d /run/systemd/resolve ] || command -v resolvectl >/dev/null 2>&1; then "

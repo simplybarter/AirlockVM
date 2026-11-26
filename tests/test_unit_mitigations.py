@@ -1821,6 +1821,7 @@ class TestMitigationsUnit(unittest.TestCase):
         self.assertIn("LIBGUESTFS_BACKEND=direct virt-customize --network", bake_cmd)
         self.assertIn("169.254.2.15/16", bake_cmd)
         self.assertIn("nameserver 169.254.2.3", bake_cmd)
+        self.assertIn("deb.nodesource.com/setup_22.x", bake_cmd)
         self.assertIn("apt-get clean", bake_cmd)
         self.assertIn("stub-resolv.conf /etc/resolv.conf", bake_cmd)
 
