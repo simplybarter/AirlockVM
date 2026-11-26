@@ -1870,6 +1870,25 @@ class TestMitigationsUnit(unittest.TestCase):
         self.assertIn("systemctl --user stop 'demo-vm-p*-proxy.socket' 'demo-vm-p*-proxy.service'", cleanup_script)
         self.assertIn("reset-failed", cleanup_script)
 
+    def test_health_check_resolves_ssh_alias_hostname(self):
+        from airlock.health import resolve_http_host, verify_route_health
+
+        with patch(
+            "airlock.health.subprocess.run",
+            return_value=MagicMock(returncode=0, stdout="user airlock\nhostname 127.0.0.1\nport 22\n", stderr=""),
+        ):
+            self.assertEqual(resolve_http_host("localhost-airlock"), "127.0.0.1")
+
+        fake_conn = MagicMock()
+        fake_conn.getresponse.return_value = MagicMock(status=200, reason="OK")
+        with patch("airlock.health.resolve_http_host", return_value="192.168.1.50"), \
+             patch("airlock.health.http.client.HTTPConnection", return_value=fake_conn) as mock_http:
+            res = verify_route_health("remotehost-airlock", 8000, "/", retries=1)
+
+        self.assertTrue(res["healthy"])
+        self.assertEqual(res["url"], "http://192.168.1.50:8000/")
+        mock_http.assert_called_once_with("192.168.1.50", 8000, timeout=3)
+
 
 if __name__ == "__main__":
     unittest.main()

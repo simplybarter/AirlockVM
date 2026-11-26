@@ -7,10 +7,40 @@ captures runtime crash logs from the guest VM if deployment fails.
 from __future__ import annotations
 
 import http.client
+import ipaddress
+import subprocess
 import time
 from typing import Any
 
 from airlock.transport import run_guest_cmd
+
+
+def resolve_http_host(host: str) -> str:
+    """Resolves an SSH config host alias (e.g. 'remotehost-airlock') to its reachable HostName."""
+    if not host or host in ("localhost", "127.0.0.1", "::1"):
+        return host
+    try:
+        ipaddress.ip_address(host)
+        return host
+    except ValueError:
+        pass
+    try:
+        res = subprocess.run(
+            ["ssh", "-G", host],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                if line.lower().startswith("hostname "):
+                    resolved = line.split(None, 1)[1].strip()
+                    if resolved:
+                        return resolved
+    except Exception:
+        pass
+    return host
 
 
 def verify_route_health(
@@ -22,13 +52,14 @@ def verify_route_health(
     vm_name: str | None = None,
 ) -> dict[str, Any]:
     """Probes an HTTP route and diagnoses crashes if unreachable."""
-    url = f"http://{host}:{port}{path}"
+    connect_host = resolve_http_host(host)
+    url = f"http://{connect_host}:{port}{path}"
     last_error = ""
 
     for attempt in range(1, retries + 1):
         try:
             start_time = time.time()
-            conn = http.client.HTTPConnection(host, port, timeout=3)
+            conn = http.client.HTTPConnection(connect_host, port, timeout=3)
             conn.request("GET", path)
             res = conn.getresponse()
             latency_ms = round((time.time() - start_time) * 1000, 2)
