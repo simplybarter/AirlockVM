@@ -89,7 +89,7 @@ By strictly separating software engineering workstations from runtime execution 
 │   ├── profiler.py                          # Live guest RAM/swap/CPU workload profiler
 │   ├── security.py                          # Workstation zero-workload & secret leak audit
 │   └── mcp/                                 # Model Context Protocol service
-│       └── server.py                        # AirlockVM FastMCP Server (26 declarative tools)
+│       └── server.py                        # AirlockVM FastMCP Server (28 declarative tools)
 ├── tests/                                   # Integration & unit test suites
 │   ├── test_integration_permutations.py     # 40-permutation end-to-end test suite
 │   └── test_unit_mitigations.py             # Deterministic unit tests
@@ -204,6 +204,10 @@ airlock snapshot <vm-name> flatten --force
 
 # Pre-bake a golden Ubuntu 24.04 cloud-init image for fast-boot cloning:
 airlock bake-image localhost
+
+# Register a new hypervisor and seed it with an established golden image:
+airlock add-host remotehost --seed-image
+airlock seed-image remotehost --source-host localhost
 
 # Connect via SSH or open in remote IDE (VS Code / Cursor):
 airlock connect <vm-name> --ide vscode
