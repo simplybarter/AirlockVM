@@ -1822,6 +1822,8 @@ class TestMitigationsUnit(unittest.TestCase):
         self.assertIn("169.254.2.15/16", bake_cmd)
         self.assertIn("nameserver 169.254.2.3", bake_cmd)
         self.assertIn("deb.nodesource.com/setup_22.x", bake_cmd)
+        self.assertIn("astral.sh/uv/install.sh", bake_cmd)
+        self.assertIn("UV_INSTALL_DIR=/usr/local/bin", bake_cmd)
         self.assertIn("apt-get clean", bake_cmd)
         self.assertIn("stub-resolv.conf /etc/resolv.conf", bake_cmd)
 

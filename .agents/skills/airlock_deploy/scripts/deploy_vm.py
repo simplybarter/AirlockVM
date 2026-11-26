@@ -506,6 +506,8 @@ def bake_golden_image(
         "apt-get clean; "
         "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -; "
         "apt-get install -y -qq -o Dpkg::Options::=--force-confnew nodejs; "
+        "curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh; "
+        "mkdir -p /etc/skel/.local/bin && ln -sf /usr/local/bin/uv /etc/skel/.local/bin/uv && ln -sf /usr/local/bin/uvx /etc/skel/.local/bin/uvx; "
         "systemctl enable docker qemu-guest-agent; "
         "apt-get clean; "
         "if [ -d /run/systemd/resolve ] || command -v resolvectl >/dev/null 2>&1; then "
