@@ -9,7 +9,7 @@
 
 > **Focus on your project—let your AI agent manage your KVM hypervisor, isolated dev VMs, and runtime deployments.**
 
-[📖 Zero-Workload Use Case](USECASE.md) • [🏗 Architecture](docs/ARCHITECTURE.md) • [🛡️ Security](docs/SECURITY.md) • [🔌 MCP Server](docs/MCP_SERVER.md) • [🧪 Integration Testing](docs/INTEGRATION_TESTING.md) • [⚡ Quickstart](#getting-started) • [📋 Changelog](CHANGELOG.md) • [🤝 Contributing](.github/CONTRIBUTING.md)
+[🎬 Demo](#demo) • [📖 Zero-Workload Use Case](USECASE.md) • [🏗 Architecture](docs/ARCHITECTURE.md) • [🛡️ Security](docs/SECURITY.md) • [🔌 MCP Server](docs/MCP_SERVER.md) • [🧪 Integration Testing](docs/INTEGRATION_TESTING.md) • [⚡ Quickstart](#getting-started) • [📋 Changelog](CHANGELOG.md) • [🤝 Contributing](.github/CONTRIBUTING.md)
 
 1. **Agentic Hypervisor Management** — Auto-discovers, sizes, and budgets local or remote Linux KVM hosts (including zero-`sudo` rootless setups).
 2. **Agentic Runtime VM Management** — Provisions, snapshots, profiles, and heals isolated execution VMs via CLI or MCP.
@@ -18,6 +18,14 @@
 By strictly separating software engineering workstations from runtime execution environments, AirlockVM enforces an isolation boundary: all builds, crawler loops, browser automation, and untrusted code evaluation execute inside dedicated guest VMs hosted on local or remote hypervisors.
 
 > 🚀 **New to AirlockVM? Check out the [5-Minute Quickstart Guide](QUICKSTART.md)!**
+
+---
+
+## Demo
+
+Watch a 3-minute end-to-end walkthrough of hypervisor preparation, VM provisioning, and application deployment:
+
+https://github.com/user-attachments/assets/dd542e31-7571-4368-bd51-cb45f7f90ee6
 
 ---
 
