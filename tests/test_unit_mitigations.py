@@ -1827,6 +1827,49 @@ class TestMitigationsUnit(unittest.TestCase):
         self.assertIn("apt-get clean", bake_cmd)
         self.assertIn("stub-resolv.conf /etc/resolv.conf", bake_cmd)
 
+    def test_proxy_setup_restarts_socket_and_purge_stops_units_without_cwd_nullglob(self):
+        deploy_mod = _load_module(
+            "deploy_vm_proxy_lifecycle_unit",
+            AIRLOCK_ROOT / ".agents" / "skills" / "airlock_deploy" / "scripts" / "deploy_vm.py",
+        )
+        params = {
+            "VM_NAME": "demo-vm",
+            "VM_IP": "192.168.122.210",
+            "VM_MAC": "52:54:00:11:22:33",
+            "LIBVIRT_NETWORK": "default",
+            "SSH_KEY_PATH": "~/.ssh/demo_vm_ed25519",
+            "PROXY_EXTERNAL_PORT": "8000",
+            "APP_INTERNAL_PORT": "8000",
+            "REPOSITORIES": [{"name": "demo", "external_port": 8000, "internal_port": 8000}],
+            "DISK_SOURCES": [],
+        }
+
+        # 1. setup_hypervisor_proxy stops old .service and restarts .socket (so FD is never stale)
+        setup_cmds: list[list[str]] = []
+        with patch.object(deploy_mod, "is_rootless_host", return_value=True), \
+             patch.object(deploy_mod, "run_cmd_status", side_effect=lambda cmd, host=None: (setup_cmds.append(list(cmd)), (0, "/usr/lib/systemd/systemd-socket-proxyd", ""))[1]), \
+             redirect_stdout(io.StringIO()):
+            deploy_mod.setup_hypervisor_proxy(params, "remotehost", dry_run=False)
+        setup_script = next(c[2] for c in setup_cmds if c[:2] == ["bash", "-c"] and "ListenStream=" in c[2])
+        self.assertIn("systemctl --user stop 'demo-vm-p8000-proxy.service'", setup_script)
+        self.assertIn("systemctl --user restart 'demo-vm-p8000-proxy.socket'", setup_script)
+
+        # 2. execute_purge enumerates unit_dir AND passes quoted globs to systemctl stop (never CWD-expanded nullglob)
+        purge_cmds: list[list[str]] = []
+        with patch.object(deploy_mod, "is_rootless_host", return_value=True), \
+             patch.object(deploy_mod, "resolve_storage_dir", return_value="/var/lib/libvirt/airlock"), \
+             patch.object(deploy_mod, "check_domain_status", return_value=(False, "not found")), \
+             patch.object(deploy_mod, "remove_static_dhcp"), \
+             patch.object(deploy_mod, "cleanup_workstation_ssh"), \
+             patch.object(deploy_mod, "sync_inventory_record"), \
+             patch.object(deploy_mod, "run_cmd_status", side_effect=lambda cmd, host=None: (purge_cmds.append(list(cmd)), (0, "", ""))[1]), \
+             redirect_stdout(io.StringIO()):
+            deploy_mod.execute_purge(params, "remotehost", dry_run=False)
+        cleanup_script = next(c[2] for c in purge_cmds if c[:2] == ["bash", "-c"] and "systemctl --user" in c[2])
+        self.assertIn("unit_dir=\"$HOME/.config/systemd/user\"", cleanup_script)
+        self.assertIn("systemctl --user stop 'demo-vm-p*-proxy.socket' 'demo-vm-p*-proxy.service'", cleanup_script)
+        self.assertIn("reset-failed", cleanup_script)
+
 
 if __name__ == "__main__":
     unittest.main()

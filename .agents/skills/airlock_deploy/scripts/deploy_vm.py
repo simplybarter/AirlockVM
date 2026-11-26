@@ -823,7 +823,9 @@ EOF
 
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 systemctl --user daemon-reload
-systemctl --user enable --now '{unit_name}.socket'
+systemctl --user stop '{unit_name}.service' 2>/dev/null || true
+systemctl --user enable '{unit_name}.socket'
+systemctl --user restart '{unit_name}.socket'
 """
         else:
             setup_script = f"""
@@ -837,7 +839,9 @@ sudo tee '{service_path}' >/dev/null << 'EOF'
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now '{unit_name}.socket'
+sudo systemctl stop '{unit_name}.service' 2>/dev/null || true
+sudo systemctl enable '{unit_name}.socket'
+sudo systemctl restart '{unit_name}.socket'
 """
         ret, _, err = run_cmd_status(["bash", "-c", setup_script], host=host)
         if ret != 0:
@@ -1918,28 +1922,42 @@ def execute_purge(params: dict, host: str, dry_run: bool = False, purge_ssh_keys
 
     # Clean up hypervisor proxy forwarders for this VM
     print(f"    -> Cleaning up hypervisor proxy forwarders for '{vm_name}'...")
-    legacy_unit = " airlock-proxy.socket" if vm_name == "airlock-vm" else ""
+    legacy_glob = " airlock-proxy.*" if vm_name == "airlock-vm" else ""
+    legacy_stop = " 'airlock-proxy.socket' 'airlock-proxy.service'" if vm_name == "airlock-vm" else ""
     rootless = is_rootless_host(host)
     if not dry_run:
         if rootless:
-            cleanup_proxy_script = (
-                f"shopt -s nullglob; "
-                f"export XDG_RUNTIME_DIR=\"/run/user/$(id -u)\"; "
-                f"systemctl --user stop {q_vm}-p*-proxy.socket {q_vm}-p*-proxy.service {q_vm}-proxy.socket{legacy_unit} 2>/dev/null || true; "
-                f"systemctl --user disable {q_vm}-p*-proxy.socket {q_vm}-proxy.socket{legacy_unit} 2>/dev/null || true; "
-                f"rm -f \"$HOME\"/.config/systemd/user/{q_vm}-p*-proxy.* \"$HOME\"/.config/systemd/user/{q_vm}-proxy.* 2>/dev/null || true; "
-                f"systemctl --user daemon-reload 2>/dev/null || true"
-            )
-            run_cmd_status(["bash", "-c", cleanup_proxy_script], host=host)
+            unit_dir = '"$HOME/.config/systemd/user"'
+            sctl = "systemctl --user"
+            env_prefix = 'export XDG_RUNTIME_DIR="/run/user/$(id -u)"; '
+            run_prefix = ["bash", "-c"]
         else:
-            cleanup_proxy_script = (
-                f"shopt -s nullglob; "
-                f"systemctl stop {q_vm}-p*-proxy.socket {q_vm}-p*-proxy.service {q_vm}-proxy.socket{legacy_unit} 2>/dev/null || true; "
-                f"systemctl disable {q_vm}-p*-proxy.socket {q_vm}-proxy.socket{legacy_unit} 2>/dev/null || true; "
-                f"rm -f /etc/systemd/system/{q_vm}-p*-proxy.* /etc/systemd/system/{q_vm}-proxy.* 2>/dev/null || true; "
-                f"systemctl daemon-reload 2>/dev/null || true"
-            )
-            run_cmd_status(["sudo", "bash", "-c", cleanup_proxy_script], host=host)
+            unit_dir = "/etc/systemd/system"
+            sctl = "systemctl"
+            env_prefix = ""
+            run_prefix = ["sudo", "bash", "-c"]
+
+        # IMPORTANT: Do NOT let bash nullglob expand unit patterns against CWD ($HOME)!
+        # 1) Enumerate real unit basenames inside unit_dir and stop/disable each explicitly.
+        # 2) Pass single-quoted glob patterns directly to systemctl so systemd stops any
+        #    active/running proxy services even if their unit files were previously removed.
+        cleanup_proxy_script = (
+            f"shopt -s nullglob; "
+            f"{env_prefix}"
+            f"unit_dir={unit_dir}; "
+            f"unit_files=($unit_dir/{q_vm}-p*-proxy.* $unit_dir/{q_vm}-proxy.*{f' $unit_dir/{legacy_glob.strip()}' if legacy_glob else ''}); "
+            f"for uf in \"${{unit_files[@]}}\"; do "
+            f"  uname=$(basename \"$uf\"); "
+            f"  {sctl} stop \"$uname\" 2>/dev/null || true; "
+            f"  {sctl} disable \"$uname\" 2>/dev/null || true; "
+            f"done; "
+            f"{sctl} stop '{vm_name}-p*-proxy.socket' '{vm_name}-p*-proxy.service' '{vm_name}-proxy.socket' '{vm_name}-proxy.service'{legacy_stop} 2>/dev/null || true; "
+            f"{sctl} disable '{vm_name}-p*-proxy.socket' '{vm_name}-proxy.socket'{legacy_stop} 2>/dev/null || true; "
+            f"rm -f \"${{unit_files[@]}}\" 2>/dev/null || true; "
+            f"{sctl} daemon-reload 2>/dev/null || true; "
+            f"{sctl} reset-failed '{vm_name}-p*-proxy.*' '{vm_name}-proxy.*' 2>/dev/null || true"
+        )
+        run_cmd_status(run_prefix + [cleanup_proxy_script], host=host)
         print(f"    [✓] Hypervisor proxy sockets cleaned.")
     else:
         if rootless:
