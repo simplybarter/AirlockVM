@@ -37,3 +37,6 @@ Thumbs.db
 # Logs & temp outputs
 *.log
 /tmp/
+
+# Local video demos & recordings
+video_demos/
