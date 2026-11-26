@@ -1,0 +1,80 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in AirlockVM
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the details below so we can reproduce and fix it quickly.
+        **Note:** Do not report security vulnerabilities here—use [Private Vulnerability Reporting](https://github.com/simplybarter/AirlockVM/security/advisories/new) instead.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      options:
+        - CLI (`airlock`)
+        - MCP Server (`airlock-mcp`)
+        - Agent Skills (`.agents/skills/`)
+        - IDE Connector (`connect_airlock.sh`)
+        - Hypervisor / Proxy / Cloud-Init
+        - Documentation / Tests
+    validations:
+      required: true
+
+  - type: dropdown
+    id: privilege_mode
+    attributes:
+      label: Hypervisor Privilege Mode
+      options:
+        - Rootless (`libvirt`/`kvm` groups, zero `sudo`)
+        - Privileged (`sudo`)
+        - Not applicable / local CLI only
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the Bug
+      description: A clear and concise description of what went wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      placeholder: |
+        1. Run command: `airlock ...`
+        2. Observe error: `...`
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Information
+      placeholder: |
+        - Host OS & Version:
+        - Target Hypervisor (localhost or remote SSH):
+        - Python Version (`python3 --version`):
+        - libvirt / QEMU Version (`virsh --version`):
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Command Output / Logs
+      description: Paste relevant terminal output (redact any secrets or private hostnames).
+      render: text

@@ -5,11 +5,11 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![Linux KVM](https://img.shields.io/badge/Virtualization-Linux%20KVM-orange.svg?logo=linux&logoColor=white)](https://www.linux-kvm.org/)
 [![libvirt](https://img.shields.io/badge/Hypervisor-libvirt%20%2F%20QEMU-red.svg?logo=qemu&logoColor=white)](https://libvirt.org/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](.github/CONTRIBUTING.md)
 
 > **Dedicated Execution Virtual Machine Control Plane, Runbook Sizing, and MCP Server**
 
-[📖 Zero-Workload Use Case](USECASE.md) • [🏗 Architecture](docs/ARCHITECTURE.md) • [🛡️ Security](docs/SECURITY.md) • [🔌 MCP Server](docs/MCP_SERVER.md) • [🧪 Integration Testing](docs/INTEGRATION_TESTING.md) • [⚡ Quickstart](#getting-started) • [🤝 Contributing](CONTRIBUTING.md)
+[📖 Zero-Workload Use Case](USECASE.md) • [🏗 Architecture](docs/ARCHITECTURE.md) • [🛡️ Security](docs/SECURITY.md) • [🔌 MCP Server](docs/MCP_SERVER.md) • [🧪 Integration Testing](docs/INTEGRATION_TESTING.md) • [⚡ Quickstart](#getting-started) • [📋 Changelog](CHANGELOG.md) • [🤝 Contributing](.github/CONTRIBUTING.md)
 
 AirlockVM provides automated tooling and a parameterized specification framework to configure, size, and deploy dedicated Linux KVM execution virtual machines for development teams and AI agents.
 
@@ -67,8 +67,9 @@ By strictly separating software engineering workstations from runtime execution 
 .
 ├── README.md                                # Project documentation
 ├── USECASE.md                               # Zero-workload local workstation use case guide
-├── CONTRIBUTING.md                          # Contribution guidelines
+├── CHANGELOG.md                             # Release history (Keep a Changelog)
 ├── LICENSE                                  # MIT License
+├── .github/                                 # Community health, templates, CI & release config
 ├── pyproject.toml                           # Modern PEP 621 packaging & CLI entry points
 ├── requirements.txt                         # Package dependencies (pyyaml, mcp)
 ├── connect_airlock.sh                        # Multi-IDE onboarding & MCP registration script
@@ -347,3 +348,14 @@ This repository includes skill definitions compatible with Antigravity AI coding
 * `/airlock_configure` — Probe hypervisors and generate parameterized VM execution runbooks.
 * `/airlock_deploy` — Deploy, provision, and manage execution VMs with strict validation gates.
 * `/airlock_rsync` — Evaluate project structure and generate the optimized `deploy_app_to_airlock.sh` script.
+
+---
+
+## Community & License
+
+* **Contributing:** See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) for setup, verification commands, and commit conventions.
+* **Code of Conduct:** Participation is governed by our [Code of Conduct](.github/CODE_OF_CONDUCT.md).
+* **Security:** To report a vulnerability privately, see [.github/SECURITY.md](.github/SECURITY.md).
+* **Support:** See [.github/SUPPORT.md](.github/SUPPORT.md) for documentation pointers and issue reporting.
+* **Changelog:** Notable changes are tracked in [CHANGELOG.md](CHANGELOG.md).
+* **License:** Released under the [MIT License](LICENSE).

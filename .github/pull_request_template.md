@@ -1,13 +1,16 @@
-## Description
-Provide a brief summary of the changes introduced in this pull request.
+## Summary
+Provide a concise summary of the changes and link any related issue (e.g., `Closes #123`).
 
 ## Type of Change
-- [ ] Bug fix (non-breaking change fixing an issue)
-- [ ] New feature (non-breaking change adding functionality)
-- [ ] Documentation update
-- [ ] Hypervisor probing / network detection enhancement
+- [ ] Bug fix (`fix`)
+- [ ] New feature (`feat`)
+- [ ] Refactor / performance (`refactor` / `perf`)
+- [ ] Documentation (`docs`)
+- [ ] Tests / CI / maintenance (`test` / `chore`)
 
-## Testing & Verification
-- [ ] Ran `python3 .agents/skills/airlock_configure/scripts/verify_config.py` with zero errors.
-- [ ] Tested dry-run rendering: `python3 .agents/skills/airlock_configure/scripts/configure_vm.py --dry-run`.
-- [ ] Tested hypervisor capability pre-flight checks.
+## Verification Checklist
+- [ ] Ran `.venv/bin/python -m unittest discover -s tests -v` with zero failures.
+- [ ] Ran `.venv/bin/python .agents/skills/airlock_configure/scripts/verify_config.py` and `.venv/bin/python .agents/skills/airlock_inventory/scripts/verify_config.py`.
+- [ ] Verified portability invariants (no hardcoded local home paths, private hostnames, or secrets).
+- [ ] Updated relevant documentation and `CHANGELOG.md` (`[Unreleased]`) if user-facing behavior changed.
+- [ ] Followed Conventional Commits (`<type>(<scope>): <subject>`).

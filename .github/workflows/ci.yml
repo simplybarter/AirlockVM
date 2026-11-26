@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Checkout repository
@@ -37,7 +37,7 @@ jobs:
 
       - name: Portability invariant check (no hardcoded local paths)
         run: |
-          if grep -rnIE --exclude-dir=__pycache__ --exclude='*.pyc' '(/home/|/Users/)' src/ docs/ tests/ .agents/ *.sh README.md QUICKSTART.md USECASE.md CONTRIBUTING.md; then
+          if grep -rnIE --exclude-dir=__pycache__ --exclude='*.pyc' '(/home/|/Users/)' src/ docs/ tests/ .agents/ *.sh README.md QUICKSTART.md USECASE.md CHANGELOG.md .github/CONTRIBUTING.md .github/SECURITY.md .github/SUPPORT.md .github/CODE_OF_CONDUCT.md .github/pull_request_template.md .github/ISSUE_TEMPLATE/; then
             echo "ERROR: Hardcoded local user path detected!"
             exit 1
           fi
