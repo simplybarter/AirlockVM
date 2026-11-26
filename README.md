@@ -7,11 +7,13 @@
 [![libvirt](https://img.shields.io/badge/Hypervisor-libvirt%20%2F%20QEMU-red.svg?logo=qemu&logoColor=white)](https://libvirt.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](.github/CONTRIBUTING.md)
 
-> **Dedicated Execution Virtual Machine Control Plane, Runbook Sizing, and MCP Server**
+> **Focus on your project—let your AI agent manage your KVM hypervisor, isolated dev VMs, and runtime deployments.**
 
 [📖 Zero-Workload Use Case](USECASE.md) • [🏗 Architecture](docs/ARCHITECTURE.md) • [🛡️ Security](docs/SECURITY.md) • [🔌 MCP Server](docs/MCP_SERVER.md) • [🧪 Integration Testing](docs/INTEGRATION_TESTING.md) • [⚡ Quickstart](#getting-started) • [📋 Changelog](CHANGELOG.md) • [🤝 Contributing](.github/CONTRIBUTING.md)
 
-AirlockVM provides automated tooling and a parameterized specification framework to configure, size, and deploy dedicated Linux KVM execution virtual machines for development teams and AI agents.
+1. **Agentic Hypervisor Management** — Auto-discovers, sizes, and budgets local or remote Linux KVM hosts (including zero-`sudo` rootless setups).
+2. **Agentic Runtime VM Management** — Provisions, snapshots, profiles, and heals isolated execution VMs via CLI or MCP.
+3. **Agentic Project Deployment** — Syncs only your application code, runs builds and tests inside the VM, and proxies live ports back to your workstation.
 
 By strictly separating software engineering workstations from runtime execution environments, AirlockVM enforces an isolation boundary: all builds, crawler loops, browser automation, and untrusted code evaluation execute inside dedicated guest VMs hosted on local or remote hypervisors.
 
